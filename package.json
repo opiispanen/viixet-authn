@@ -1,0 +1,28 @@
+{
+    "name": "viixet-authn",
+    "version": "0.0.1",
+    "description": "A simple framework agnostic SQLite authorization module for Node.js",
+    "main": "src/index.js",
+    "type": "module",
+    "scripts": {
+    },
+    "keywords": [
+        "authentication",
+        "nodejs",
+        "sqlite",
+        "framework-agnostic"
+    ],
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/opiispanen/viixet-authn"
+    },
+    "author": "Otto Piispanen",
+    "license": "MIT",
+    "dependencies": {
+        "dotenv": "^10.0.0",
+        "bcrypt": "^5.1.0",
+        "sqlite3": "^5.1.4",
+        "uuid": "^9.0.0"
+    }
+  }
+  
