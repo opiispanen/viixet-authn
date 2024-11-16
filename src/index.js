@@ -1,7 +1,6 @@
 import bcrypt from 'bcrypt'
 import { v4 as uuidv4 } from 'uuid'
 import { transaction } from './transaction.js'
-import 'dotenv/config'
 
 export const AUTH_TOKEN_TYPE = {
     twoFactor: 1,
