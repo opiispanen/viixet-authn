@@ -10,7 +10,8 @@ db.serialize(() => {
 			user_id TEXT PRIMARY KEY,
 			username TEXT NOT NULL,
 			password TEXT NOT NULL,
-			email TEXT NOT NULL UNIQUE,
+			email TEXT NOT NULL,
+			extra TEXT NOT NULL,
 			created DATETIME DEFAULT CURRENT_TIMESTAMP,
 			modified DATETIME DEFAULT CURRENT_TIMESTAMP,
 			deleted INT DEFAULT 0
@@ -21,6 +22,7 @@ db.serialize(() => {
 			user_id TEXT NOT NULL,
 			created DATETIME DEFAULT CURRENT_TIMESTAMP,
 			modified DATETIME DEFAULT CURRENT_TIMESTAMP,
+			active INT DEFAULT 0,
 			deleted INT DEFAULT 0,
 			FOREIGN KEY (user_id) REFERENCES user(user_id)
 		);
@@ -29,6 +31,7 @@ db.serialize(() => {
 			token_id TEXT PRIMARY KEY,
 			user_id TEXT NOT NULL,
 			session_id TEXT NOT NULL,
+			token TEXT NOT NULL,
 			type INT NOT NULL,
 			created DATETIME DEFAULT CURRENT_TIMESTAMP,
 			modified DATETIME DEFAULT CURRENT_TIMESTAMP,
