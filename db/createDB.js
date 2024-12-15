@@ -1,7 +1,12 @@
+import path from 'path'
 import sqlite3 from 'sqlite3'
 import 'dotenv/config'
 
-const db = new sqlite3.Database(process.env.VIIXET_AUTHN_DB || 'VIIXET_AUTHN');
+const projectRoot = process.env.INIT_CWD || process.cwd()
+const dbName = process.env.VIIXET_AUTHN_DB || 'VIIXET_AUTHN.db'
+const dbPath = path.join(projectRoot, dbName)
+
+const db = new sqlite3.Database(dbPath);
 
 // Create the 'todo' table
 db.serialize(() => {

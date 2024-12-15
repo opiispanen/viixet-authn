@@ -1,9 +1,14 @@
+import path from 'path'
 import sqlite3 from 'sqlite3'
 import 'dotenv/config'
 
+const projectRoot = process.env.INIT_CWD || process.cwd()
+const dbName = process.env.VIIXET_AUTHN_DB || 'VIIXET_AUTHN'
+const dbPath = path.join(projectRoot, dbName)
+
 export function transaction(query, data = []) {
     return new Promise((resolve, reject) => {
-        const db = new sqlite3.Database(process.env.VIIXET_AUTHN_DB)
+        const db = new sqlite3.Database(dbPath)
 
         db.serialize(() => {
             const isSelectQuery = query.trim().toUpperCase().startsWith('SELECT')
