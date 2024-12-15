@@ -4,7 +4,9 @@
     "description": "A simple framework agnostic SQLite authorization module for Node.js",
     "main": "src/index.js",
     "type": "module",
-    "scripts": {},
+    "scripts": {
+        "postinstall": "node ./db/createDB.js"
+    },
     "keywords": [
         "authentication",
         "nodejs",
