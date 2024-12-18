@@ -2,6 +2,7 @@ import bcrypt from 'bcrypt'
 import { v4 as uuidv4 } from 'uuid'
 import { transaction } from './transaction.js'
 import { activateSession } from './session.js'
+import { ERRORS } from './errors.js'
 
 export const AUTH_TOKEN_TYPE = {
     twoFactor: 1,
@@ -78,12 +79,12 @@ export async function authenticateTwoFactorCode(numbers, token_id, user_id, sess
         ]
     )
 
-    if (rows.length === 0) throw new Error('User not found')
+    if (rows.length === 0) throw new Error(ERRORS.TOKEN_NOTFOUND)
     
 	const { token } = rows[0]
     const match = await bcrypt.compare(numbers.join('-'), token)
 	
-    if (!match) throw new Error('Invalid credentials')
+    if (!match) throw new Error(ERRORS.TOKEN_INVALID)
 
     await deactivateAuthToken(token_id)
     await activateSession(session_id)
@@ -122,11 +123,11 @@ export async function authenticateLoginToken(token, user_id, session_id) {
         ]
     )
 
-    if (rows.length === 0) throw new Error('User not found')
+    if (rows.length === 0) throw new Error(ERRORS.TOKEN_NOTFOUND)
     
     const { token_id } = rows[0]
 
-    if (!token_id) throw new Error('Invalid credentials')
+    if (!token_id) throw new Error(ERRORS.TOKEN_INVALID)
 
     await deactivateAuthToken(token_id)
     await activateSession(session_id)
@@ -166,11 +167,11 @@ export async function changePassword(password, token, user_id, session_id) {
         ]
     )
 
-    if (rows.length === 0) throw new Error('User not found')
+    if (rows.length === 0) throw new Error(ERRORS.TOKEN_NOTFOUND)
 
     const { token_id } = rows[0]
 	
-    if (!token_id) throw new Error('Invalid credentials')
+    if (!token_id) throw new Error(ERRORS.TOKEN_INVALID)
 
     await deactivateAuthToken(token_id)
 

@@ -2,6 +2,7 @@ import bcrypt from 'bcrypt'
 import { v4 as uuidv4 } from 'uuid'
 import { transaction } from './transaction.js'
 import { createSession } from './session.js'
+import { ERRORS } from './errors.js'
 
 export async function userExists(username) {
     const query = 'SELECT user_id FROM user WHERE username = ? OR email = ? LIMIT 1'
@@ -13,7 +14,7 @@ export async function userExists(username) {
 export async function registerUser(username, password, email) {
     const exists = await userExists(username)
 
-    if (exists) throw new Error('User already exists')
+    if (exists) throw new Error(ERRORS.USER_ALREADYEXISTS)
 
     const hashedPassword = await bcrypt.hash(password, 10)
     const query = `
@@ -37,13 +38,13 @@ export async function loginUser(username, password) {
     const query = 'SELECT user_id, username, password FROM user WHERE deleted = 0 AND username = ? LIMIT 1'
     const { rows } = await transaction(query, [username])
 
-    if (rows.length === 0) throw new Error('User not found')
+    if (rows.length === 0) throw new Error(ERRORS.USER_NOTFOUND)
 
     const [ user ] = rows
     const { user_id, username, password: hashedPassword } = user
     const match = await bcrypt.compare(password, hashedPassword)
     
-    if (!match) throw new Error('Invalid credentials')
+    if (!match) throw new Error(ERRORS.CREDENTIALS_INVALID)
     
     const session_id = await createSession(user_id)
 
@@ -61,12 +62,12 @@ export async function authenticate(session_id) {
     `
     const { rows } = await transaction(query, [session_id])
 
-    if (rows.length === 0) throw new Error('Session not found')
+    if (rows.length === 0) throw new Error(ERRORS.SESSION_NOTFOUND)
 
     const { user_id, username, active } = rows[0]
-    const sessionExpires = new Date(modified).getTime() + parseInt(process.env.VIIXET_AUTHN_EXPIRES)
+    const sessionExpires = new Date(modified).getTime() + (24 * 3_600_000) // default 24 hours
 
-    if (Date.now() > sessionExpires) throw new Error('Session has expired')
+    if (Date.now() > sessionExpires) throw new Error(ERRORS.SESSION_EXPIRED)
 
     return { session_id, user_id, username, active }
 }
