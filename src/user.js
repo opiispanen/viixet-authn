@@ -1,6 +1,6 @@
 import bcrypt from 'bcrypt'
 import { v4 as uuidv4 } from 'uuid'
-import { transaction } from './transaction.js'
+import { transaction } from '../db/transaction.js'
 import { createSession } from './session.js'
 import { ERRORS } from './errors.js'
 
@@ -41,7 +41,7 @@ export async function loginUser(username, password) {
     if (rows.length === 0) throw new Error(ERRORS.USER_NOTFOUND)
 
     const [ user ] = rows
-    const { user_id, username, password: hashedPassword } = user
+    const { user_id, password: hashedPassword } = user
     const match = await bcrypt.compare(password, hashedPassword)
     
     if (!match) throw new Error(ERRORS.CREDENTIALS_INVALID)

@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from 'uuid'
-import { transaction } from './transaction.js'
+import { transaction } from '../db/transaction.js'
 
 export async function createSession(user_id, active) {
     const query = `

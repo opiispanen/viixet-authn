@@ -1,6 +1,6 @@
 import bcrypt from 'bcrypt'
 import { v4 as uuidv4 } from 'uuid'
-import { transaction } from './transaction.js'
+import { transaction } from '../db/transaction.js'
 import { activateSession } from './session.js'
 import { ERRORS } from './errors.js'
 

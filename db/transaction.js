@@ -3,7 +3,7 @@ import sqlite3 from 'sqlite3'
 import 'dotenv/config'
 
 const projectRoot = process.env.INIT_CWD || process.cwd()
-const dbName = process.env.VIIXET_AUTHN_DB || 'VIIXET_AUTHN'
+const dbName = process.env.VIIXET_AUTHN_DB || 'VIIXET_AUTHN.db'
 const dbPath = path.join(projectRoot, dbName)
 
 export function transaction(query, data = []) {
