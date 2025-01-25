@@ -1,7 +1,7 @@
 import bcrypt from 'bcrypt'
 import { v4 as uuidv4 } from 'uuid'
 import { transaction } from '../db/transaction.js'
-import { createSession } from './session.js'
+import { createSession, deleteSession } from './session.js'
 import { ERRORS } from './errors.js'
 
 export async function userExists(username) {
@@ -52,9 +52,15 @@ export async function loginUser(username, password) {
     
     if (!match) throw new Error(ERRORS.CREDENTIALS_INVALID)
     
-    const session_id = await createSession(user_id)
+    const session_id = await createSession(user_id, 1)
 
     return { session_id, user_id, username }
+}
+
+export async function logoutUser(session_id) {
+    const success = await deleteSession(session_id)
+
+    return { success }
 }
 
 export async function authenticate(session_id) {

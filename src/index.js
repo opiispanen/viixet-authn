@@ -9,6 +9,7 @@ export {
 } from './token.js'
 export {
     loginUser,
+    logoutUser,
     registerUser,
     authenticate,
 } from './user.js'

@@ -27,3 +27,14 @@ export async function activateSession(session_id) {
     )
     return !!id
 }
+
+export async function deleteSession(session_id) {
+    const query = `
+        UPDATE session SET active = 0, deleted = 1 WHERE session_id = ?
+    `
+    const { id } = await transaction(
+        query, 
+        [ session_id ]
+    )
+    return !!id
+}
