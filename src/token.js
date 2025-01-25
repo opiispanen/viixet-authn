@@ -11,6 +11,7 @@ export const AUTH_TOKEN_TYPE = {
 }
 
 export async function createAuthToken(type, token, user_id, session_id) {
+    const tokenId = uuidv4()
     const query = `
         INSERT INTO auth_token (
             token_id, user_id, session_id, type, token
@@ -19,25 +20,30 @@ export async function createAuthToken(type, token, user_id, session_id) {
     const { id } = await transaction(
         query, 
         [
-            uuidv4(), 
+            tokenId, 
             user_id,
             session_id,
             type,
             token
         ]
     )
-    return id
+
+    if (!id) {
+        throw new Error(ERRORS.TOKEN_NEW_FAILED)
+    }
+
+    return token
 }
 
 export async function deactivateAuthToken(token_id) {
     const query = `
         UPDATE auth_token SET deleted = 1 WHERE token_id = ?
     `
-    const { id } = await transaction(
+    const { changes } = await transaction(
         query, 
         [ token_id ]
     )
-    return id
+    return !!changes
 }
 
 function generateRandomNumbers() {
@@ -178,7 +184,7 @@ export async function changePassword(password, token, user_id, session_id) {
     const update = `
         UPDATE user SET password = ? WHERE user_id = ?
     `
-    const { id } = await transaction(
+    const { changes } = await transaction(
         update, 
         [ 
             hashedPassword, 
@@ -186,5 +192,5 @@ export async function changePassword(password, token, user_id, session_id) {
         ]
     )
 
-    return id
+    return !!changes
 }

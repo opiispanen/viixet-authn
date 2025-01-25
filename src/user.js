@@ -16,6 +16,7 @@ export async function registerUser(username, password, email) {
 
     if (exists) throw new Error(ERRORS.USER_ALREADYEXISTS)
 
+    const userId = uuidv4()
     const hashedPassword = await bcrypt.hash(password, 10)
     const query = `
         INSERT INTO user (user_id, username, password, email, extra) 
@@ -24,14 +25,19 @@ export async function registerUser(username, password, email) {
     const { id } = await transaction(
         query, 
         [
-            uuidv4(), 
+            userId, 
             username, 
             hashedPassword, 
             email,
             '{}'
         ]
     )
-    return id
+
+    if (!id) {
+        throw new Error(ERRORS.USER_NEW_FAILED)
+    }
+
+    return userId
 }
 
 export async function loginUser(username, password) {
@@ -54,7 +60,7 @@ export async function loginUser(username, password) {
 export async function authenticate(session_id) {
     const query = `
         SELECT 
-            u.user_id, u.username, s.active
+            u.user_id, u.username, s.active, s.modified
         FROM session s
         JOIN user u ON s.user_id = u.user_id
         WHERE s.session_id = ? AND s.deleted = 0 AND u.deleted = 0
@@ -64,7 +70,7 @@ export async function authenticate(session_id) {
 
     if (rows.length === 0) throw new Error(ERRORS.SESSION_NOTFOUND)
 
-    const { user_id, username, active } = rows[0]
+    const { user_id, username, active, modified } = rows[0]
     const sessionExpires = new Date(modified).getTime() + (24 * 3_600_000) // default 24 hours
 
     if (Date.now() > sessionExpires) throw new Error(ERRORS.SESSION_EXPIRED)
