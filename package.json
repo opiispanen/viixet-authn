@@ -1,6 +1,6 @@
 {
     "name": "viixet-authn",
-    "version": "0.0.1",
+    "version": "1.0.0",
     "description": "A simple framework agnostic SQLite authorization module for Node.js",
     "main": "src/index.js",
     "type": "module",
