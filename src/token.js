@@ -32,7 +32,7 @@ export async function createAuthToken(type, token, user_id, session_id) {
         throw new Error(ERRORS.TOKEN_NEW_FAILED)
     }
 
-    return token
+    return tokenId
 }
 
 export async function deactivateAuthToken(token_id) {
