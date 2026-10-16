@@ -4,15 +4,15 @@ import { transaction } from '../db/transaction.js'
 import { createSession, deleteSession } from './session.js'
 import { ERRORS } from './errors.js'
 
-export async function userExists(username) {
+export async function userExists(username, email = username) {
     const query = 'SELECT user_id FROM user WHERE username = ? OR email = ? LIMIT 1'
-    const { rows } = await transaction(query, [username, username])
+    const { rows } = await transaction(query, [username, email])
     
     return rows.length > 0
 }
 
 export async function registerUser(username, password, email) {
-    const exists = await userExists(username)
+    const exists = await userExists(username, email)
 
     if (exists) throw new Error(ERRORS.USER_ALREADYEXISTS)
 

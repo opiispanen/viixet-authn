@@ -5,7 +5,8 @@
     "main": "src/index.js",
     "type": "module",
     "scripts": {
-        "postinstall": "node ./db/createDB.js"
+        "postinstall": "node ./db/createDB.js",
+        "test": "node --test test/"
     },
     "keywords": [
         "authentication",
