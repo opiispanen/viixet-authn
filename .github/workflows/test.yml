@@ -1,0 +1,23 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: [20, 22]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      # The postinstall script would create a database in the project, and the tests don't need it
+      - run: npm install --ignore-scripts
+      # --ignore-scripts also skips the native parts of these two, so they are built here
+      - run: npm rebuild bcrypt sqlite3
+      - run: npm test

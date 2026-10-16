@@ -1,5 +1,7 @@
 # Viixet AuthN
 
+[![Tests](https://github.com/opiispanen/viixet-authn/actions/workflows/test.yml/badge.svg)](https://github.com/opiispanen/viixet-authn/actions/workflows/test.yml)
+
 A simple framework agnostic SQLite authorization module for Node.js. This module creates the underlying infrastructure for user registration and authentication. Made to speed up creating small projects with user authentication.
 
 You still have to create the logic for handling session cookies or other ways to handle session tokens.
@@ -175,7 +177,7 @@ Keys the module uses itself: `login:user:<hash of the username>`, `login:ip:<add
 
 ## Testing
 
-The tests use Node's built-in test runner, so there are no extra dependencies. Node 18 or newer is needed.
+The tests use Node's built-in test runner, so there are no extra dependencies. Node 20 or newer is needed. The tests run on Node 20 and 22 on every push.
 
 1. Install the dependencies without running the `postinstall` script. The script creates a `VIIXET_AUTHN.db` in the project root, which the tests don't need:
 
@@ -183,7 +185,13 @@ The tests use Node's built-in test runner, so there are no extra dependencies. N
    npm install --ignore-scripts
    ```
 
-   If the native modules (`bcrypt`, `sqlite3`) fail to load afterwards, run `npm rebuild` once.
+   That flag also skips the install scripts of the dependencies, and `bcrypt` and `sqlite3` need theirs to fetch or build their native part. Run this once afterwards, which only touches those two:
+
+   ```
+   npm rebuild bcrypt sqlite3
+   ```
+
+   If the rebuild has to compile and fails, you need a C++ toolchain (`python3`, `make` and `g++` on Linux).
 
 2. Run the tests:
 
@@ -191,6 +199,6 @@ The tests use Node's built-in test runner, so there are no extra dependencies. N
    npm test
    ```
 
-The tests create their own database in a temporary folder and delete it when they finish. Your own `VIIXET_AUTHN.db` and `.env` are never touched. To run a single test, use `node --test --test-name-pattern="two factor" test/`.
+The tests create their own database in a temporary folder and delete it when they finish. Your own `VIIXET_AUTHN.db` and `.env` are never touched. To run a single test, use `node --test --test-name-pattern="two factor"`.
 
 Each test file lives in `test/` and ends in `.test.js`.
