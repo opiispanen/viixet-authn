@@ -158,7 +158,7 @@ test('a new database gets the tables and no backup', async () => {
         `SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name`
     )).map(row => row.name)
 
-    assert.deepEqual(tables, ['auth_token', 'session', 'user'])
+    assert.deepEqual(tables, ['auth_token', 'rate_limit', 'session', 'user'])
     assert.equal(await version(), MIGRATIONS.length)
     assert.deepEqual(backups(), [])
 })

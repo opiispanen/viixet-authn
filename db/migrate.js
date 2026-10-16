@@ -57,6 +57,17 @@ export const MIGRATIONS = [
             await run('ALTER TABLE auth_token ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0')
         }
     },
+
+    // 3: the generic rate limiter. Times are Unix seconds.
+    async ({ run }) => {
+        await run(`CREATE TABLE IF NOT EXISTS rate_limit (
+            key TEXT PRIMARY KEY,
+            count INTEGER NOT NULL DEFAULT 0,
+            window_start INTEGER NOT NULL
+        )`)
+
+        await run('CREATE INDEX IF NOT EXISTS idx_rate_limit_window ON rate_limit(window_start)')
+    },
 ]
 
 const BUSY_TIMEOUT_MS = 5000

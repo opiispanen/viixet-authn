@@ -14,5 +14,10 @@ export {
     authenticate,
 } from './user.js'
 export {
+    hitRateLimit,
+    resetRateLimit,
+    purgeRateLimits,
+} from './rateLimit.js'
+export {
     ERRORS as VIIXET_AUTHN_ERRORS
 } from './errors.js'
