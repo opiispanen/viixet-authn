@@ -18,6 +18,15 @@ A simple Express.js example is available here: [Vue SSR only TODO](https://githu
 
 In that project the auth database is separate from the todos.
 
+## Database
+
+The module keeps its data in one SQLite file in your project root, named `VIIXET_AUTHN.db`.
+
+- **Location:** set `VIIXET_AUTHN_DB` in your environment or in a `.env` file in the project root to use another name. A relative name is placed in the project root and an absolute path is used as it is. A value that is already set in the real environment wins over `.env`. If you use `.env`, create it before running `npm install`, because the database is created at install time.
+- **Setup and upgrades:** `npm install` creates the database. The schema has a version number, which is stored in the database file (`PRAGMA user_version`). When a newer version of the module needs schema changes, they are applied automatically, at install time or on the first query after the upgrade. Existing users and sessions are kept.
+- **Backup:** before the first upgrade of an existing database, the file is copied to `VIIXET_AUTHN.db.bak-v<old version>` next to it. The copy is made once and never overwritten. It's safe to delete after you have checked that everything works.
+- **Newer database:** if the database was upgraded by a newer version of the module, an older version refuses to use it and tells you to update.
+
 ## Usage
 
 The module doesn't know about your web framework. It takes plain values in and gives plain values or errors back. Reading cookies, sending emails and showing pages is up to you. The examples below show the intended way to use each feature.

@@ -1,12 +1,25 @@
-import path from 'path'
 import sqlite3 from 'sqlite3'
-import 'dotenv/config'
+import { dbPath } from './config.js'
+import { migrate } from './migrate.js'
 
-const projectRoot = process.env.INIT_CWD || process.cwd()
-const dbName = process.env.VIIXET_AUTHN_DB || 'VIIXET_AUTHN.db'
-const dbPath = path.join(projectRoot, dbName)
+// The database is checked once per process, before the first query, so an app
+// that upgraded the library without reinstalling still gets the new schema.
+let migrated = null
 
-export function transaction(query, data = []) {
+function ensureMigrated() {
+    if (!migrated) {
+        migrated = migrate().catch(err => {
+            migrated = null // try again on the next query
+            throw err
+        })
+    }
+
+    return migrated
+}
+
+export async function transaction(query, data = []) {
+    await ensureMigrated()
+
     return new Promise((resolve, reject) => {
         const db = new sqlite3.Database(dbPath)
 
