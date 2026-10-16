@@ -31,8 +31,8 @@ before(async () => {
 after(() => fs.rmSync(tmp, { recursive: true, force: true }))
 
 test('register, login, authenticate and logout', async () => {
-    const user_id = await lib.registerUser('anna', 'secret', 'anna@example.com')
-    const { session_id } = await lib.loginUser('anna', 'secret')
+    const user_id = await lib.registerUser('hilma', 'secret', 'hilma@example.com')
+    const { session_id } = await lib.loginUser('hilma', 'secret')
     const session = await lib.authenticate(session_id)
 
     assert.equal(session.user_id, user_id)
@@ -46,29 +46,55 @@ test('register, login, authenticate and logout', async () => {
 })
 
 test('wrong password is rejected', async () => {
-    await lib.registerUser('ben', 'secret', 'ben@example.com')
+    await lib.registerUser('taavetti', 'secret', 'taavetti@example.com')
 
     await assert.rejects(
-        lib.loginUser('ben', 'wrong'),
+        lib.loginUser('taavetti', 'wrong'),
         { message: lib.VIIXET_AUTHN_ERRORS.CREDENTIALS_INVALID }
     )
 })
 
 test('duplicate username and duplicate email are rejected', async () => {
-    await lib.registerUser('cara', 'secret', 'cara@example.com')
+    await lib.registerUser('kaisa', 'secret', 'kaisa@example.com')
 
     await assert.rejects(
-        lib.registerUser('cara', 'secret', 'other@example.com'),
+        lib.registerUser('kaisa', 'secret', 'muu@example.com'),
         { message: lib.VIIXET_AUTHN_ERRORS.USER_ALREADYEXISTS }
     )
     await assert.rejects(
-        lib.registerUser('cara2', 'secret', 'cara@example.com'),
+        lib.registerUser('kaisa2', 'secret', 'kaisa@example.com'),
         { message: lib.VIIXET_AUTHN_ERRORS.USER_ALREADYEXISTS }
     )
 })
 
+test('login with a second step gives an inactive session that authenticate rejects', async () => {
+    const user_id = await lib.registerUser('lyydia', 'secret', 'lyydia@example.com')
+    const { session_id } = await lib.loginUser('lyydia', 'secret', { requireSecondStep: true })
+
+    await assert.rejects(
+        lib.authenticate(session_id),
+        { message: lib.VIIXET_AUTHN_ERRORS.SESSION_INACTIVE }
+    )
+
+    const pending = await lib.authenticate(session_id, { allowInactive: true })
+    assert.equal(pending.user_id, user_id)
+    assert.equal(pending.active, 0)
+
+    const { token_id, numbers } = await lib.createTwoFactorCode(user_id, session_id)
+    await lib.authenticateTwoFactorCode(numbers, token_id, user_id, session_id)
+
+    assert.equal((await lib.authenticate(session_id)).active, 1)
+})
+
+test('a normal login still gives an active session', async () => {
+    await lib.registerUser('juho', 'secret', 'juho@example.com')
+    const { session_id } = await lib.loginUser('juho', 'secret')
+
+    assert.equal((await lib.authenticate(session_id)).active, 1)
+})
+
 test('activateSession and logoutUser report whether a row changed', async () => {
-    const user_id = await lib.registerUser('dan', 'secret', 'dan@example.com')
+    const user_id = await lib.registerUser('efraim', 'secret', 'efraim@example.com')
     const session_id = await createSession(user_id, 0)
 
     assert.equal(await activateSession(session_id), true)
@@ -103,7 +129,7 @@ async function tokenId(token, type) {
 }
 
 test('2FA code expires after 15 minutes', async () => {
-    const user_id = await lib.registerUser('fay', 'secret', 'fay@example.com')
+    const user_id = await lib.registerUser('impi', 'secret', 'impi@example.com')
     const session_id = await createSession(user_id, 0)
     const fresh = await lib.createTwoFactorCode(user_id, session_id)
     const old = await lib.createTwoFactorCode(user_id, session_id)
@@ -121,7 +147,7 @@ test('2FA code expires after 15 minutes', async () => {
 })
 
 test('email login link expires after 15 minutes', async () => {
-    const user_id = await lib.registerUser('gus', 'secret', 'gus@example.com')
+    const user_id = await lib.registerUser('aukusti', 'secret', 'aukusti@example.com')
     const fresh_session = await createSession(user_id, 0)
     const old_session = await createSession(user_id, 0)
 
@@ -143,7 +169,7 @@ test('email login link expires after 15 minutes', async () => {
 })
 
 test('password reset link lasts 45 minutes', async () => {
-    const user_id = await lib.registerUser('hal', 'secret', 'hal@example.com')
+    const user_id = await lib.registerUser('kaarlo', 'secret', 'kaarlo@example.com')
     const ok_session = await createSession(user_id, 0)
     const late_session = await createSession(user_id, 0)
 
@@ -166,14 +192,14 @@ test('password reset link lasts 45 minutes', async () => {
         await lib.changePassword('new-secret', 'ok-reset-token', user_id, ok_session),
         true
     )
-    assert.ok((await lib.loginUser('hal', 'new-secret')).session_id)
+    assert.ok((await lib.loginUser('kaarlo', 'new-secret')).session_id)
 })
 
 test('two factor code activates a pending session', async () => {
-    const user_id = await lib.registerUser('eve', 'secret', 'eve@example.com')
+    const user_id = await lib.registerUser('tyyne', 'secret', 'tyyne@example.com')
     const session_id = await createSession(user_id, 0)
 
-    assert.equal((await lib.authenticate(session_id)).active, 0)
+    assert.equal((await lib.authenticate(session_id, { allowInactive: true })).active, 0)
 
     const { token_id, numbers } = await lib.createTwoFactorCode(user_id, session_id)
 

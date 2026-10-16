@@ -18,6 +18,104 @@ A simple Express.js example is available here: [Vue SSR only TODO](https://githu
 
 In that project the auth database is separate from the todos.
 
+## Usage
+
+The module doesn't know about your web framework. It takes plain values in and gives plain values or errors back. Reading cookies, sending emails and showing pages is up to you. The examples below show the intended way to use each feature.
+
+All functions are async. Errors are thrown as `Error` objects whose `message` is one of the `VIIXET_AUTHN_ERRORS` constants, so compare against those and not against text.
+
+```js
+import {
+    registerUser, loginUser, logoutUser, authenticate,
+    VIIXET_AUTHN_ERRORS as ERRORS,
+} from 'viixet-authn'
+```
+
+### Register, log in, protect a route, log out
+
+```js
+const user_id = await registerUser(username, password, email)
+
+const { session_id } = await loginUser(username, password)
+// Store session_id in a cookie: httpOnly, secure and sameSite=lax or strict.
+
+// On every request that needs a logged-in user:
+try {
+    const { user_id, username } = await authenticate(session_id)
+} catch (e) {
+    // SESSION_NOTFOUND, SESSION_EXPIRED or SESSION_INACTIVE: send the user to the login page
+}
+
+await logoutUser(session_id) // { success: true }
+```
+
+Things to know:
+- The session id is the proof of login. Treat it like a password and never put it in a URL.
+- A session lasts 24 hours from login. It isn't extended when it is used.
+- `authenticate` only accepts fully logged-in sessions. A session that is waiting for a second step (see below) is rejected with `SESSION_INACTIVE`.
+- `registerUser` throws `USER_ALREADYEXISTS` if the username or the email is already in use. Check the password rules yourself, because the module doesn't.
+- The module doesn't limit login attempts. Add rate limiting in your app, for example per IP and per username.
+
+### Two-factor codes
+
+Pass `requireSecondStep` and the session starts as inactive. It becomes active only after the code is verified:
+
+```js
+const { session_id, user_id } = await loginUser(username, password, { requireSecondStep: true })
+
+// Create a code and deliver it (email, SMS, ...). `numbers` is an array of 6 digits.
+const { token_id, numbers } = await createTwoFactorCode(user_id, session_id)
+sendCode(numbers.join(''))
+
+// Keep session_id in the cookie as usual. Remember token_id too, for example in the cookie or a form field.
+
+// When the user types the code in:
+const digits = code.split('').map(Number)
+await authenticateTwoFactorCode(digits, token_id, user_id, session_id) // true, or throws
+
+// To find out who the pending session belongs to:
+const { user_id } = await authenticate(session_id, { allowInactive: true })
+```
+
+- A code is valid for 15 minutes and works once. A wrong code throws `TOKEN_INVALID`, and an expired, used or unknown one throws `TOKEN_NOTFOUND`.
+- Use `{ allowInactive: true }` only on the second-step page. Every other route should call `authenticate(session_id)` without it.
+- Wrong guesses are not counted yet, so limit attempts in your app.
+
+### Email login links and password reset
+
+These two use a token that you generate, store through the module and send by email. Make the token long and random, for example `crypto.randomBytes(32).toString('hex')`:
+
+```js
+const token = crypto.randomBytes(32).toString('hex')
+
+await createEmailLoginToken(token, user_id, session_id)   // login link, valid 15 minutes
+await createPasswordRenewalToken(token, user_id, session_id) // reset link, valid 45 minutes
+
+// Email a link that contains the token. When it is opened:
+await authenticateLoginToken(token, user_id, session_id) // true: activates the session
+await changePassword(newPassword, token, user_id, session_id) // true: sets the new password
+```
+
+- Each token works once and then it is spent.
+- Both functions need a `session_id` and `user_id` besides the token, so your link has to carry them or you have to find them from the token. A token for someone who isn't logged in needs an inactive session created first with `createSession(user_id, 0)`. At the moment that is imported with `import { createSession } from 'viixet-authn/src/session.js'`. It will be exported from the main entry later.
+- Don't reveal whether an email address exists. Answer "if the address is registered, we sent a link" in both cases.
+
+### Errors
+
+| Constant | Meaning |
+|---|---|
+| `USER_ALREADYEXISTS` | The username or email is taken |
+| `USER_NOTFOUND` | No user with that username |
+| `CREDENTIALS_INVALID` | Wrong password |
+| `SESSION_NOTFOUND` | Unknown or logged-out session |
+| `SESSION_EXPIRED` | The session is older than 24 hours |
+| `SESSION_INACTIVE` | The session is waiting for a second step |
+| `TOKEN_NOTFOUND` | The token is unknown, used or expired |
+| `TOKEN_INVALID` | The 2FA code was wrong |
+| `USER_NEW_FAILED`, `SESSION_NEW_FAILED`, `TOKEN_NEW_FAILED` | A database insert failed |
+
+`USER_NOTFOUND` and `CREDENTIALS_INVALID` let you tell the two cases apart. Show your users the same message for both.
+
 ## Testing
 
 The tests use Node's built-in test runner, so there are no extra dependencies. Node 18 or newer is needed.

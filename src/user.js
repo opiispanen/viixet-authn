@@ -40,7 +40,9 @@ export async function registerUser(username, password, email) {
     return userId
 }
 
-export async function loginUser(username, password) {
+// With { requireSecondStep: true } the session starts inactive (active = 0) and
+// only works after a 2FA code or an email login token has been verified.
+export async function loginUser(username, password, { requireSecondStep = false } = {}) {
     const query = 'SELECT user_id, username, password FROM user WHERE deleted = 0 AND username = ? LIMIT 1'
     const { rows } = await transaction(query, [username])
 
@@ -52,7 +54,7 @@ export async function loginUser(username, password) {
     
     if (!match) throw new Error(ERRORS.CREDENTIALS_INVALID)
     
-    const session_id = await createSession(user_id, 1)
+    const session_id = await createSession(user_id, requireSecondStep ? 0 : 1)
 
     return { session_id, user_id, username }
 }
@@ -63,7 +65,9 @@ export async function logoutUser(session_id) {
     return { success }
 }
 
-export async function authenticate(session_id) {
+// Inactive sessions (waiting for a second step) are rejected unless
+// { allowInactive: true } is passed, which the second step itself needs.
+export async function authenticate(session_id, { allowInactive = false } = {}) {
     const query = `
         SELECT 
             u.user_id, u.username, s.active, s.modified
@@ -80,6 +84,7 @@ export async function authenticate(session_id) {
     const sessionExpires = new Date(modified).getTime() + (24 * 3_600_000) // default 24 hours
 
     if (Date.now() > sessionExpires) throw new Error(ERRORS.SESSION_EXPIRED)
+    if (!active && !allowInactive) throw new Error(ERRORS.SESSION_INACTIVE)
 
     return { session_id, user_id, username, active }
 }
