@@ -163,6 +163,79 @@ test('a new database gets the tables and no backup', async () => {
     assert.deepEqual(backups(), [])
 })
 
+test('a new database gets unique indexes on username and email', async () => {
+    reset()
+
+    await migrate()
+
+    const indexes = (await query(
+        `SELECT name FROM sqlite_master WHERE type = 'index' AND name LIKE 'idx_user_%' ORDER BY name`
+    )).map(row => row.name)
+
+    assert.deepEqual(indexes, ['idx_user_email', 'idx_user_username'])
+
+    await query(
+        `INSERT INTO user (user_id, username, password, email, extra) VALUES (?, ?, ?, ?, ?)`,
+        ['id-1', 'hilma', 'hash', 'hilma@example.com', '{}']
+    )
+
+    await assert.rejects(
+        query(
+            `INSERT INTO user (user_id, username, password, email, extra) VALUES (?, ?, ?, ?, ?)`,
+            ['id-2', 'hilma', 'hash', 'toinen@example.com', '{}']
+        ),
+        { code: 'SQLITE_CONSTRAINT' }
+    )
+    await assert.rejects(
+        query(
+            `INSERT INTO user (user_id, username, password, email, extra) VALUES (?, ?, ?, ?, ?)`,
+            ['id-3', 'taavetti', 'hash', 'hilma@example.com', '{}']
+        ),
+        { code: 'SQLITE_CONSTRAINT' }
+    )
+})
+
+test('duplicates skip the index with one warning, and it is added once they are gone', async t => {
+    reset()
+    await exec(SCHEMA_1_0_0)
+
+    const insert = (id, username, email) => query(
+        `INSERT INTO user (user_id, username, password, email, extra) VALUES (?, ?, ?, ?, ?)`,
+        [id, username, 'hash', email, '{}']
+    )
+
+    // Two accounts share an email, which the old registration check allowed
+    await insert('id-1', 'kaisa', 'yhteinen@example.com')
+    await insert('id-2', 'kaarlo', 'yhteinen@example.com')
+
+    const warn = t.mock.method(console, 'warn', () => {})
+    const indexNames = async () => (await query(
+        `SELECT name FROM sqlite_master WHERE type = 'index' AND name LIKE 'idx_user_%' ORDER BY name`
+    )).map(row => row.name)
+
+    await migrate()
+    await migrate()
+
+    // The username index is made, the email index waits, and the data is untouched
+    assert.deepEqual(await indexNames(), ['idx_user_username'])
+    assert.equal((await query('SELECT * FROM user')).length, 2)
+
+    // Warned once, with the value and where to look
+    assert.equal(warn.mock.callCount(), 1)
+
+    const message = warn.mock.calls[0].arguments[0]
+
+    assert.match(message, /user\.email/)
+    assert.match(message, /"yhteinen@example\.com" \(2 rows\)/)
+    assert.match(message, /SELECT user_id/)
+
+    await query('DELETE FROM user WHERE user_id = ?', ['id-2'])
+    await migrate()
+
+    assert.deepEqual(await indexNames(), ['idx_user_email', 'idx_user_username'])
+    assert.equal(warn.mock.callCount(), 1)
+})
+
 test('a database from a newer library is refused', async () => {
     await exec(`PRAGMA user_version = ${MIGRATIONS.length + 1}`)
 

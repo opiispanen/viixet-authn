@@ -124,6 +124,103 @@ async function getVersion({ all }) {
     return user_version
 }
 
+// Runs the missing steps in one transaction
+async function applyMigrations(sql) {
+    await sql.run('BEGIN IMMEDIATE')
+
+    try {
+        // The version is read again now that the write lock is held
+        const from = await getVersion(sql)
+
+        if (from > MIGRATIONS.length) throw newerError(from)
+
+        if (from < MIGRATIONS.length) {
+            await backup(sql, from)
+
+            for (let version = from; version < MIGRATIONS.length; version++) {
+                await MIGRATIONS[version](sql)
+                await sql.run(`PRAGMA user_version = ${version + 1}`)
+            }
+        }
+
+        await sql.run('COMMIT')
+    } catch (err) {
+        await sql.run('ROLLBACK').catch(() => {})
+        throw err
+    }
+}
+
+// Unique indexes can't be created while the table holds duplicates, and a
+// numbered step is only run once. So these are not steps: they are checked every
+// time, and each one is created as soon as there are no duplicates. Until then
+// the app keeps working and a warning explains what to fix.
+const UNIQUE_INDEXES = [
+    { name: 'idx_user_username', table: 'user', column: 'username' },
+    { name: 'idx_user_email', table: 'user', column: 'email' },
+]
+const MAX_LISTED_DUPLICATES = 10
+const warnedIndexes = new Set()
+
+function warnAboutDuplicates({ name, table, column }, duplicates) {
+    if (warnedIndexes.has(name)) return
+
+    warnedIndexes.add(name)
+
+    const listed = duplicates
+        .slice(0, MAX_LISTED_DUPLICATES)
+        .map(({ value, count }) => `  ${JSON.stringify(value)} (${count} rows)`)
+        .join('\n')
+    const more = duplicates.length > MAX_LISTED_DUPLICATES ? '\n  ...and more' : ''
+
+    console.warn(
+        `viixet-authn: could not add the unique index on ${table}.${column}, because some ` +
+        `values are used more than once. The app keeps working, but duplicates can still be ` +
+        `created until the index exists.\n` +
+        `Duplicate ${column} values:\n${listed}${more}\n` +
+        `Look at the rows with: SELECT user_id, username, email, created, deleted FROM ${table} ` +
+        `WHERE ${column} = '<value>';\n` +
+        `Remove or change the duplicates and the index is added automatically on the next start.`
+    )
+}
+
+async function ensureUniqueIndexes({ run, all }) {
+    const existing = new Set(
+        (await all(`SELECT name FROM sqlite_master WHERE type = 'index'`)).map(row => row.name)
+    )
+
+    if (UNIQUE_INDEXES.every(({ name }) => existing.has(name))) return
+
+    await run('BEGIN IMMEDIATE')
+
+    try {
+        for (const index of UNIQUE_INDEXES) {
+            const { name, table, column } = index
+
+            // Checked again now that the write lock is held
+            const [found] = await all(`SELECT name FROM sqlite_master WHERE type = 'index' AND name = ?`, [name])
+
+            if (found) continue
+
+            const duplicates = await all(
+                `SELECT ${column} AS value, COUNT(*) AS count FROM ${table}
+                GROUP BY ${column} HAVING COUNT(*) > 1
+                LIMIT ${MAX_LISTED_DUPLICATES + 1}`
+            )
+
+            if (duplicates.length > 0) {
+                warnAboutDuplicates(index, duplicates)
+            } else {
+                await run(`CREATE UNIQUE INDEX IF NOT EXISTS ${name} ON ${table}(${column})`)
+            }
+        }
+
+        await run('COMMIT')
+    } catch (err) {
+        await run('ROLLBACK').catch(() => {})
+        throw err
+    }
+}
+
 // Brings the database up to date. Safe to call many times, and safe when two
 // processes start at once: the second one waits for the lock and then finds
 // nothing left to do.
@@ -137,30 +234,9 @@ export async function migrate() {
         const current = await getVersion(sql)
 
         if (current > MIGRATIONS.length) throw newerError(current)
-        if (current === MIGRATIONS.length) return
+        if (current < MIGRATIONS.length) await applyMigrations(sql)
 
-        await sql.run('BEGIN IMMEDIATE')
-
-        try {
-            // The version is read again now that the write lock is held
-            const from = await getVersion(sql)
-
-            if (from > MIGRATIONS.length) throw newerError(from)
-
-            if (from < MIGRATIONS.length) {
-                await backup(sql, from)
-
-                for (let version = from; version < MIGRATIONS.length; version++) {
-                    await MIGRATIONS[version](sql)
-                    await sql.run(`PRAGMA user_version = ${version + 1}`)
-                }
-            }
-
-            await sql.run('COMMIT')
-        } catch (err) {
-            await sql.run('ROLLBACK').catch(() => {})
-            throw err
-        }
+        await ensureUniqueIndexes(sql)
     } finally {
         await close(db)
     }

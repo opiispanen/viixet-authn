@@ -23,6 +23,10 @@ export async function transaction(query, data = []) {
     return new Promise((resolve, reject) => {
         const db = new sqlite3.Database(dbPath)
 
+        // SQLite lets one writer in at a time. Wait up to 5 seconds for the lock
+        // instead of failing at once with SQLITE_BUSY.
+        db.configure('busyTimeout', 5000)
+
         db.serialize(() => {
             const isSelectQuery = query.trim().toUpperCase().startsWith('SELECT')
             const method = isSelectQuery ? 'all' : 'run'

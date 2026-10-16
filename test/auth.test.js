@@ -67,6 +67,19 @@ test('duplicate username and duplicate email are rejected', async () => {
     )
 })
 
+test('two registrations at the same moment create only one user', async () => {
+    const results = await Promise.allSettled([
+        lib.registerUser('seppo', 'secret', 'seppo@example.com'),
+        lib.registerUser('seppo', 'secret', 'seppo@example.com'),
+    ])
+
+    assert.equal(results.filter(result => result.status === 'fulfilled').length, 1)
+
+    const failed = results.find(result => result.status === 'rejected')
+
+    assert.equal(failed.reason.message, lib.VIIXET_AUTHN_ERRORS.USER_ALREADYEXISTS)
+})
+
 test('login is limited to 10 attempts per username, even with the right password', async () => {
     await lib.registerUser('aapeli', 'secret', 'aapeli@example.com')
 

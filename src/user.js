@@ -35,16 +35,28 @@ export async function registerUser(username, password, email) {
         INSERT INTO user (user_id, username, password, email, extra) 
         VALUES (?, ?, ?, ?, ?)
     `
-    const { id } = await transaction(
-        query, 
-        [
-            userId, 
-            username, 
-            hashedPassword, 
-            email,
-            '{}'
-        ]
-    )
+    let result
+
+    try {
+        result = await transaction(
+            query,
+            [
+                userId,
+                username,
+                hashedPassword,
+                email,
+                '{}'
+            ]
+        )
+    } catch (err) {
+        // Two registrations at the same moment can both pass userExists. The
+        // unique indexes stop the second one.
+        if (err.code === 'SQLITE_CONSTRAINT') throw new Error(ERRORS.USER_ALREADYEXISTS)
+
+        throw err
+    }
+
+    const { id } = result
 
     if (!id) {
         throw new Error(ERRORS.USER_NEW_FAILED)
