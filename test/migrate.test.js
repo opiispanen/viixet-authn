@@ -131,6 +131,24 @@ test('running the migration again changes nothing', async () => {
     assert.deepEqual(backups(), ['from-env.db.bak-v0'])
 })
 
+test('a version 1 database gets the attempts column and keeps its tokens', async () => {
+    reset()
+    await exec(SCHEMA_1_0_0)
+    await exec('PRAGMA user_version = 1')
+    await query(
+        `INSERT INTO auth_token (token_id, user_id, session_id, token, type) VALUES (?, ?, ?, ?, ?)`,
+        ['token-1', 'id-1', 'session-1', 'hash', 1]
+    )
+
+    await migrate()
+
+    assert.equal(await version(), MIGRATIONS.length)
+
+    const tokens = await query('SELECT token_id, token, attempts FROM auth_token')
+    assert.deepEqual(tokens, [{ token_id: 'token-1', token: 'hash', attempts: 0 }])
+    assert.deepEqual(backups(), ['from-env.db.bak-v1'])
+})
+
 test('a new database gets the tables and no backup', async () => {
     reset()
 

@@ -195,6 +195,49 @@ test('password reset link lasts 45 minutes', async () => {
     assert.ok((await lib.loginUser('kaarlo', 'new-secret')).session_id)
 })
 
+test('2FA code is spent after 5 wrong guesses', async () => {
+    const user_id = await lib.registerUser('siiri', 'secret', 'siiri@example.com')
+    const session_id = await createSession(user_id, 0)
+    const { token_id, numbers } = await lib.createTwoFactorCode(user_id, session_id)
+    const wrong = numbers.map(n => (n + 1) % 10)
+
+    for (let i = 0; i < 5; i++) {
+        await assert.rejects(
+            lib.authenticateTwoFactorCode(wrong, token_id, user_id, session_id),
+            { message: lib.VIIXET_AUTHN_ERRORS.TOKEN_INVALID }
+        )
+    }
+
+    // Even the right code no longer works, and the session stays inactive
+    await assert.rejects(
+        lib.authenticateTwoFactorCode(numbers, token_id, user_id, session_id),
+        { message: lib.VIIXET_AUTHN_ERRORS.TOKEN_NOTFOUND }
+    )
+    await assert.rejects(
+        lib.authenticate(session_id),
+        { message: lib.VIIXET_AUTHN_ERRORS.SESSION_INACTIVE }
+    )
+})
+
+test('2FA code still works after 4 wrong guesses', async () => {
+    const user_id = await lib.registerUser('elli', 'secret', 'elli@example.com')
+    const session_id = await createSession(user_id, 0)
+    const { token_id, numbers } = await lib.createTwoFactorCode(user_id, session_id)
+    const wrong = numbers.map(n => (n + 1) % 10)
+
+    for (let i = 0; i < 4; i++) {
+        await assert.rejects(
+            lib.authenticateTwoFactorCode(wrong, token_id, user_id, session_id),
+            { message: lib.VIIXET_AUTHN_ERRORS.TOKEN_INVALID }
+        )
+    }
+
+    assert.equal(
+        await lib.authenticateTwoFactorCode(numbers, token_id, user_id, session_id),
+        true
+    )
+})
+
 test('two factor code activates a pending session', async () => {
     const user_id = await lib.registerUser('tyyne', 'secret', 'tyyne@example.com')
     const session_id = await createSession(user_id, 0)

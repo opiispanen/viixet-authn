@@ -18,6 +18,9 @@ const TOKEN_MAX_AGE_MINUTES = {
     [AUTH_TOKEN_TYPE.passwordRenewal]: 45,
 }
 
+// Wrong guesses allowed per 2FA code. After that the code is spent and a new one is needed.
+const TWO_FACTOR_MAX_ATTEMPTS = 5
+
 function notExpiredSql(type) {
     return `AND created >= datetime('now', '-${ TOKEN_MAX_AGE_MINUTES[type] } minutes')`
 }
@@ -78,32 +81,46 @@ export async function createTwoFactorCode(user_id, session_id) {
 }
 
 export async function authenticateTwoFactorCode(numbers, token_id, user_id, session_id) {
-    const query = `SELECT 
-            token 
-        FROM auth_token 
-        WHERE deleted = 0 
-        AND token_id = ? 
-        AND user_id = ? 
+    // A guess is counted before the code is compared, in one UPDATE, so guesses
+    // made at the same time can't get past the limit.
+    const reserve = `UPDATE auth_token
+        SET attempts = attempts + 1
+        WHERE deleted = 0
+        AND token_id = ?
+        AND user_id = ?
         AND session_id = ?
         AND type = ?
-        ${ notExpiredSql(AUTH_TOKEN_TYPE.twoFactor) }
-        LIMIT 1`
-    const { rows } = await transaction(
-        query,
+        AND attempts < ?
+        ${ notExpiredSql(AUTH_TOKEN_TYPE.twoFactor) }`
+    const { changes } = await transaction(
+        reserve,
         [
             token_id,
-            user_id, 
+            user_id,
             session_id,
-            AUTH_TOKEN_TYPE.twoFactor
+            AUTH_TOKEN_TYPE.twoFactor,
+            TWO_FACTOR_MAX_ATTEMPTS
         ]
     )
 
-    if (rows.length === 0) throw new Error(ERRORS.TOKEN_NOTFOUND)
-    
-	const { token } = rows[0]
+    if (!changes) throw new Error(ERRORS.TOKEN_NOTFOUND)
+
+    const { rows } = await transaction(
+        'SELECT token FROM auth_token WHERE token_id = ? LIMIT 1',
+        [ token_id ]
+    )
+    const { token } = rows[0]
     const match = await bcrypt.compare(numbers.join('-'), token)
-	
-    if (!match) throw new Error(ERRORS.TOKEN_INVALID)
+
+    if (!match) {
+        // The last allowed guess was wrong: the code is spent
+        await transaction(
+            'UPDATE auth_token SET deleted = 1 WHERE token_id = ? AND attempts >= ?',
+            [ token_id, TWO_FACTOR_MAX_ATTEMPTS ]
+        )
+
+        throw new Error(ERRORS.TOKEN_INVALID)
+    }
 
     await deactivateAuthToken(token_id)
     await activateSession(session_id)

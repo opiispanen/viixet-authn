@@ -47,6 +47,16 @@ export const MIGRATIONS = [
             FOREIGN KEY (session_id) REFERENCES session(session_id)
         )`)
     },
+
+    // 2: count guesses made against a token (2FA attempt limit).
+    // Existing rows get 0.
+    async ({ run, all }) => {
+        const columns = await all('PRAGMA table_info(auth_token)')
+
+        if (!columns.some(column => column.name === 'attempts')) {
+            await run('ALTER TABLE auth_token ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0')
+        }
+    },
 ]
 
 const BUSY_TIMEOUT_MS = 5000

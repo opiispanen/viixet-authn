@@ -86,9 +86,10 @@ await authenticateTwoFactorCode(digits, token_id, user_id, session_id) // true, 
 const { user_id } = await authenticate(session_id, { allowInactive: true })
 ```
 
-- A code is valid for 15 minutes and works once. A wrong code throws `TOKEN_INVALID`, and an expired, used or unknown one throws `TOKEN_NOTFOUND`.
+- A code is valid for 15 minutes and works once. A wrong code throws `TOKEN_INVALID`, and an expired, used, spent or unknown one throws `TOKEN_NOTFOUND`.
+- Each code allows 5 guesses. After the fifth wrong one the code is spent, even the right digits fail after that, and the user has to ask for a new code.
+- Asking for a new code gives a fresh set of guesses, so limit how often a session can request codes in your app (for example once a minute and a few per hour).
 - Use `{ allowInactive: true }` only on the second-step page. Every other route should call `authenticate(session_id)` without it.
-- Wrong guesses are not counted yet, so limit attempts in your app.
 
 ### Email login links and password reset
 
