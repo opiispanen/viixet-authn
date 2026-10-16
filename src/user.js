@@ -1,8 +1,21 @@
 import bcrypt from 'bcrypt'
 import { v4 as uuidv4 } from 'uuid'
 import { transaction } from '../db/transaction.js'
+import { createHash } from 'node:crypto'
 import { createSession, deleteSession } from './session.js'
+import { hitRateLimit, resetRateLimit } from './rateLimit.js'
 import { ERRORS } from './errors.js'
+
+// Login attempts per username (reset by a successful login) and per address
+const LOGIN_USER_LIMIT = { max: 10, windowSeconds: 900 }
+const LOGIN_IP_LIMIT = { max: 30, windowSeconds: 900 }
+
+// The username is hashed so it stays out of the table and the key is always short
+function loginUserKey(username) {
+    const hash = createHash('sha256').update(String(username).toLowerCase()).digest('hex')
+
+    return `login:user:${hash}`
+}
 
 export async function userExists(username, email = username) {
     const query = 'SELECT user_id FROM user WHERE username = ? OR email = ? LIMIT 1'
@@ -42,7 +55,23 @@ export async function registerUser(username, password, email) {
 
 // With { requireSecondStep: true } the session starts inactive (active = 0) and
 // only works after a 2FA code or an email login token has been verified.
-export async function loginUser(username, password, { requireSecondStep = false } = {}) {
+//
+// Attempts are rate limited and throw RATE_LIMITED (with `retryAfter`) when there
+// are too many: per username, and also per address when { ip } is given.
+// { rateLimit: false } turns this off for apps that do their own limiting.
+export async function loginUser(
+    username,
+    password,
+    { requireSecondStep = false, ip, rateLimit = true } = {}
+) {
+    const userKey = loginUserKey(username)
+
+    if (rateLimit) {
+        if (ip) await hitRateLimit(`login:ip:${String(ip).slice(0, 100)}`, LOGIN_IP_LIMIT)
+
+        await hitRateLimit(userKey, LOGIN_USER_LIMIT)
+    }
+
     const query = 'SELECT user_id, username, password FROM user WHERE deleted = 0 AND username = ? LIMIT 1'
     const { rows } = await transaction(query, [username])
 
@@ -53,7 +82,10 @@ export async function loginUser(username, password, { requireSecondStep = false 
     const match = await bcrypt.compare(password, hashedPassword)
     
     if (!match) throw new Error(ERRORS.CREDENTIALS_INVALID)
-    
+
+    // The address counter is kept, so logging in to your own account doesn't clear it
+    if (rateLimit) await resetRateLimit(userKey)
+
     const session_id = await createSession(user_id, requireSecondStep ? 0 : 1)
 
     return { session_id, user_id, username }

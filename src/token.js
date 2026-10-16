@@ -2,6 +2,7 @@ import bcrypt from 'bcrypt'
 import { v4 as uuidv4 } from 'uuid'
 import { transaction } from '../db/transaction.js'
 import { activateSession } from './session.js'
+import { hitRateLimit } from './rateLimit.js'
 import { ERRORS } from './errors.js'
 
 export const AUTH_TOKEN_TYPE = {
@@ -20,6 +21,9 @@ const TOKEN_MAX_AGE_MINUTES = {
 
 // Wrong guesses allowed per 2FA code. After that the code is spent and a new one is needed.
 const TWO_FACTOR_MAX_ATTEMPTS = 5
+
+// Codes that can be requested per session
+const TWO_FACTOR_REQUEST_LIMIT = { max: 5, windowSeconds: 900 }
 
 function notExpiredSql(type) {
     return `AND created >= datetime('now', '-${ TOKEN_MAX_AGE_MINUTES[type] } minutes')`
@@ -71,7 +75,14 @@ function generateRandomNumbers() {
     return randomNumbers;
 }
 
-export async function createTwoFactorCode(user_id, session_id) {
+// Requesting codes is rate limited per session and throws RATE_LIMITED (with
+// `retryAfter`), because every new code gives a new set of guesses.
+// { rateLimit: false } turns this off for apps that do their own limiting.
+export async function createTwoFactorCode(user_id, session_id, { rateLimit = true } = {}) {
+    if (rateLimit) {
+        await hitRateLimit(`2fa-request:${session_id}`, TWO_FACTOR_REQUEST_LIMIT)
+    }
+
     const numbers = generateRandomNumbers()
     const token = await bcrypt.hash(numbers.join('-'), 10)
 

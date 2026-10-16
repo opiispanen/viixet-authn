@@ -67,6 +67,119 @@ test('duplicate username and duplicate email are rejected', async () => {
     )
 })
 
+test('login is limited to 10 attempts per username, even with the right password', async () => {
+    await lib.registerUser('aapeli', 'secret', 'aapeli@example.com')
+
+    for (let i = 0; i < 10; i++) {
+        await assert.rejects(
+            lib.loginUser('aapeli', 'wrong'),
+            { message: lib.VIIXET_AUTHN_ERRORS.CREDENTIALS_INVALID }
+        )
+    }
+
+    await assert.rejects(
+        lib.loginUser('aapeli', 'secret'),
+        error => {
+            assert.equal(error.message, lib.VIIXET_AUTHN_ERRORS.RATE_LIMITED)
+            assert.ok(error.retryAfter >= 1 && error.retryAfter <= 900)
+
+            return true
+        }
+    )
+})
+
+test('unknown usernames are limited too', async () => {
+    for (let i = 0; i < 10; i++) {
+        await assert.rejects(
+            lib.loginUser('tuntematon', 'secret'),
+            { message: lib.VIIXET_AUTHN_ERRORS.USER_NOTFOUND }
+        )
+    }
+
+    await assert.rejects(
+        lib.loginUser('tuntematon', 'secret'),
+        { message: lib.VIIXET_AUTHN_ERRORS.RATE_LIMITED }
+    )
+})
+
+test('a successful login clears the username counter', async () => {
+    await lib.registerUser('maiju', 'secret', 'maiju@example.com')
+
+    for (let i = 0; i < 9; i++) {
+        await assert.rejects(
+            lib.loginUser('maiju', 'wrong'),
+            { message: lib.VIIXET_AUTHN_ERRORS.CREDENTIALS_INVALID }
+        )
+    }
+
+    assert.ok((await lib.loginUser('maiju', 'secret')).session_id)
+
+    // 10 more wrong attempts are allowed, which would not be the case without the reset
+    for (let i = 0; i < 10; i++) {
+        await assert.rejects(
+            lib.loginUser('maiju', 'wrong'),
+            { message: lib.VIIXET_AUTHN_ERRORS.CREDENTIALS_INVALID }
+        )
+    }
+})
+
+test('login is limited per address when ip is given', async () => {
+    for (let i = 0; i < 30; i++) {
+        await assert.rejects(
+            lib.loginUser(`vieras${i}`, 'secret', { ip: '10.0.0.1' }),
+            { message: lib.VIIXET_AUTHN_ERRORS.USER_NOTFOUND }
+        )
+    }
+
+    await assert.rejects(
+        lib.loginUser('vieras-uusi', 'secret', { ip: '10.0.0.1' }),
+        { message: lib.VIIXET_AUTHN_ERRORS.RATE_LIMITED }
+    )
+
+    // another address is not affected
+    await assert.rejects(
+        lib.loginUser('vieras-uusi', 'secret', { ip: '10.0.0.2' }),
+        { message: lib.VIIXET_AUTHN_ERRORS.USER_NOTFOUND }
+    )
+})
+
+test('rateLimit: false turns login limiting off', async () => {
+    await lib.registerUser('ville', 'secret', 'ville@example.com')
+
+    for (let i = 0; i < 12; i++) {
+        await assert.rejects(
+            lib.loginUser('ville', 'wrong', { rateLimit: false }),
+            { message: lib.VIIXET_AUTHN_ERRORS.CREDENTIALS_INVALID }
+        )
+    }
+
+    assert.ok((await lib.loginUser('ville', 'secret', { rateLimit: false })).session_id)
+})
+
+test('2FA code requests are limited to 5 per session', async () => {
+    const user_id = await lib.registerUser('pietari', 'secret', 'pietari@example.com')
+    const session_id = await createSession(user_id, 0)
+    const other_session = await createSession(user_id, 0)
+
+    for (let i = 0; i < 5; i++) {
+        await lib.createTwoFactorCode(user_id, session_id)
+    }
+
+    await assert.rejects(
+        lib.createTwoFactorCode(user_id, session_id),
+        error => {
+            assert.equal(error.message, lib.VIIXET_AUTHN_ERRORS.RATE_LIMITED)
+            assert.ok(error.retryAfter >= 1)
+
+            return true
+        }
+    )
+
+    // another session is not affected, and the limit can be turned off
+    assert.ok(await lib.createTwoFactorCode(user_id, other_session))
+    assert.ok(await lib.createTwoFactorCode(user_id, session_id, { rateLimit: false }))
+})
+
 test('login with a second step gives an inactive session that authenticate rejects', async () => {
     const user_id = await lib.registerUser('lyydia', 'secret', 'lyydia@example.com')
     const { session_id } = await lib.loginUser('lyydia', 'secret', { requireSecondStep: true })
