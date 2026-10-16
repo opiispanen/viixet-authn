@@ -10,6 +10,18 @@ export const AUTH_TOKEN_TYPE = {
     emailLogin: 3,
 }
 
+// Tokens older than this are treated as not found. Compared in SQL against the
+// UTC `created` column, so the server's timezone doesn't matter.
+const TOKEN_MAX_AGE_MINUTES = {
+    [AUTH_TOKEN_TYPE.twoFactor]: 15,
+    [AUTH_TOKEN_TYPE.emailLogin]: 15,
+    [AUTH_TOKEN_TYPE.passwordRenewal]: 45,
+}
+
+function notExpiredSql(type) {
+    return `AND created >= datetime('now', '-${ TOKEN_MAX_AGE_MINUTES[type] } minutes')`
+}
+
 export async function createAuthToken(type, token, user_id, session_id) {
     const tokenId = uuidv4()
     const query = `
@@ -72,13 +84,14 @@ export async function authenticateTwoFactorCode(numbers, token_id, user_id, sess
         WHERE deleted = 0 
         AND token_id = ? 
         AND user_id = ? 
-        AND session_id = ? 
+        AND session_id = ?
         AND type = ?
+        ${ notExpiredSql(AUTH_TOKEN_TYPE.twoFactor) }
         LIMIT 1`
     const { rows } = await transaction(
-        query, 
-        [ 
-            token_id, 
+        query,
+        [
+            token_id,
             user_id, 
             session_id,
             AUTH_TOKEN_TYPE.twoFactor
@@ -118,12 +131,13 @@ export async function authenticateLoginToken(token, user_id, session_id) {
         AND user_id = ? 
         AND session_id = ? 
         AND type = ?
+        ${ notExpiredSql(AUTH_TOKEN_TYPE.emailLogin) }
         LIMIT 1`
     const { rows } = await transaction(
-        query, 
-        [ 
-            token, 
-            user_id, 
+        query,
+        [
+            token,
+            user_id,
             session_id,
             AUTH_TOKEN_TYPE.emailLogin
         ]
@@ -162,12 +176,13 @@ export async function changePassword(password, token, user_id, session_id) {
         AND user_id = ? 
         AND session_id = ? 
         AND type = ?
+        ${ notExpiredSql(AUTH_TOKEN_TYPE.passwordRenewal) }
         LIMIT 1`
     const { rows } = await transaction(
-        query, 
-        [ 
-            token, 
-            user_id, 
+        query,
+        [
+            token,
+            user_id,
             session_id,
             AUTH_TOKEN_TYPE.passwordRenewal
         ]

@@ -5,6 +5,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import sqlite3 from 'sqlite3'
 
 // Every query opens its own connection, so ':memory:' would give each query an
 // empty database. A temporary folder is used as the project root instead.
@@ -73,6 +74,99 @@ test('activateSession and logoutUser report whether a row changed', async () => 
     assert.equal(await activateSession(session_id), true)
     assert.equal(await activateSession('no-such-session'), false)
     assert.deepEqual(await lib.logoutUser('no-such-session'), { success: false })
+})
+
+// Moves a token's `created` time into the past
+function ageToken(token_id, minutes) {
+    return new Promise((resolve, reject) => {
+        const db = new sqlite3.Database(path.join(tmp, 'VIIXET_AUTHN.db'))
+
+        db.run(
+            `UPDATE auth_token SET created = datetime('now', ?) WHERE token_id = ?`,
+            [`-${minutes} minutes`, token_id],
+            err => {
+                db.close()
+                err ? reject(err) : resolve()
+            }
+        )
+    })
+}
+
+async function tokenId(token, type) {
+    const { transaction } = await import('../db/transaction.js')
+    const { rows } = await transaction(
+        'SELECT token_id FROM auth_token WHERE token = ? AND type = ?',
+        [token, type]
+    )
+
+    return rows[0].token_id
+}
+
+test('2FA code expires after 15 minutes', async () => {
+    const user_id = await lib.registerUser('fay', 'secret', 'fay@example.com')
+    const session_id = await createSession(user_id, 0)
+    const fresh = await lib.createTwoFactorCode(user_id, session_id)
+    const old = await lib.createTwoFactorCode(user_id, session_id)
+
+    await ageToken(old.token_id, 16)
+
+    await assert.rejects(
+        lib.authenticateTwoFactorCode(old.numbers, old.token_id, user_id, session_id),
+        { message: lib.VIIXET_AUTHN_ERRORS.TOKEN_NOTFOUND }
+    )
+    assert.equal(
+        await lib.authenticateTwoFactorCode(fresh.numbers, fresh.token_id, user_id, session_id),
+        true
+    )
+})
+
+test('email login link expires after 15 minutes', async () => {
+    const user_id = await lib.registerUser('gus', 'secret', 'gus@example.com')
+    const fresh_session = await createSession(user_id, 0)
+    const old_session = await createSession(user_id, 0)
+
+    await lib.createEmailLoginToken('fresh-login-token', user_id, fresh_session)
+    await lib.createEmailLoginToken('old-login-token', user_id, old_session)
+    await ageToken(
+        await tokenId('old-login-token', lib.AUTH_TOKEN_TYPE.emailLogin),
+        16
+    )
+
+    await assert.rejects(
+        lib.authenticateLoginToken('old-login-token', user_id, old_session),
+        { message: lib.VIIXET_AUTHN_ERRORS.TOKEN_NOTFOUND }
+    )
+    assert.equal(
+        await lib.authenticateLoginToken('fresh-login-token', user_id, fresh_session),
+        true
+    )
+})
+
+test('password reset link lasts 45 minutes', async () => {
+    const user_id = await lib.registerUser('hal', 'secret', 'hal@example.com')
+    const ok_session = await createSession(user_id, 0)
+    const late_session = await createSession(user_id, 0)
+
+    await lib.createPasswordRenewalToken('ok-reset-token', user_id, ok_session)
+    await lib.createPasswordRenewalToken('late-reset-token', user_id, late_session)
+    await ageToken(
+        await tokenId('ok-reset-token', lib.AUTH_TOKEN_TYPE.passwordRenewal),
+        44
+    )
+    await ageToken(
+        await tokenId('late-reset-token', lib.AUTH_TOKEN_TYPE.passwordRenewal),
+        46
+    )
+
+    await assert.rejects(
+        lib.changePassword('new-secret', 'late-reset-token', user_id, late_session),
+        { message: lib.VIIXET_AUTHN_ERRORS.TOKEN_NOTFOUND }
+    )
+    assert.equal(
+        await lib.changePassword('new-secret', 'ok-reset-token', user_id, ok_session),
+        true
+    )
+    assert.ok((await lib.loginUser('hal', 'new-secret')).session_id)
 })
 
 test('two factor code activates a pending session', async () => {
