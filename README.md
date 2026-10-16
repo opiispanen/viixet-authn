@@ -2,9 +2,29 @@
 
 [![Tests](https://github.com/opiispanen/viixet-authn/actions/workflows/test.yml/badge.svg)](https://github.com/opiispanen/viixet-authn/actions/workflows/test.yml)
 
-A simple framework agnostic SQLite authorization module for Node.js. This module creates the underlying infrastructure for user registration and authentication. Made to speed up creating small projects with user authentication.
+A simple framework agnostic SQLite authentication module for Node.js. This module creates the underlying infrastructure for user registration and authentication. Made to speed up creating small projects with user authentication.
 
 You still have to create the logic for handling session cookies or other ways to handle session tokens.
+
+## Why use it
+
+- **Small and readable.** A handful of files you can read in one sitting, so you know what your login does.
+- **Your data stays with you.** Users, sessions and tokens live in one SQLite file in your project. There is no account with a third party and nothing to host.
+- **Works with any framework.** It takes plain values in and gives plain values or errors back. Express, Fastify, a script or a serverless function all work the same way.
+- **Sensible defaults.** Passwords are hashed with bcrypt. Login attempts and 2FA code requests are rate limited, tokens expire, and a 2FA code allows only a few guesses.
+- **Safe to upgrade.** The database schema is versioned and upgraded automatically, with a backup first. Changes are written down in the [changelog](CHANGELOG.md).
+- **Tested.** The behaviour is covered by an automated test suite that runs on every push.
+- **Few dependencies.** Four small ones: `bcrypt`, `sqlite3`, `uuid` and `dotenv`.
+
+## What this is not
+
+Please read this before you choose it for a project.
+
+- **Not authorization.** It answers "who is this user?" and not "what may they do?". Groups, roles, organizations and permissions are out of scope and belong in a separate layer.
+- **Not a ready-made login system.** There are no screens, routes, cookies or emails. You build those and call the functions.
+- **Not single sign-on or social login.** There is no OAuth, OpenID Connect, SAML or passkey support. It is username, password and the tokens described below.
+- **Not for several servers or heavy write loads.** The data is one SQLite file on a local disk. That suits small and medium projects on one machine and doesn't suit a fleet of servers sharing a database.
+- **Not a certified or independently audited product.** It is open source software under the MIT license, provided as it is and without any warranty. If a break-in would be costly for you, have your setup reviewed, or use a widely reviewed service or library instead.
 
 ## What this module does?
 
