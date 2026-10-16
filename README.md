@@ -6,6 +6,8 @@ A simple framework agnostic SQLite authentication module for Node.js. This modul
 
 You still have to create the logic for handling session cookies or other ways to handle session tokens.
 
+Version 1.0 was written entirely by a human. Version 2.0 onwards is built with AI assistance in a pair-programming style. The human sets the direction and reads all the code that is written.
+
 ## Why use it
 
 - **Small and readable.** A handful of files you can read in one sitting, so you know what your login does.
