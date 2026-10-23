@@ -3,6 +3,68 @@
 Versions follow [semantic versioning](https://semver.org/). Because the module owns a
 database, a change to the schema version (`PRAGMA user_version`) is always mentioned here.
 
+## 2.1.0 - 2026-10-23
+
+No function changed its name, its arguments or its return shape. Calls that worked before
+can behave differently, see "Changed behaviour".
+
+### Changed behaviour
+
+- **`registerUser` checks the format of its input** and stores nothing if it is wrong. It
+  also removes spaces at the start and end of the username and email first.
+  - Username (`USERNAME_INVALID`): 3 to 64 characters. Letters `a-z`, digits, `_` and `-`,
+    and dots between them. No accents, emoji or spaces.
+  - Email (`EMAIL_INVALID`): the usual form of an address (RFC 5322), ASCII only. The shape is
+    checked, not that the address exists.
+  - Password (`PASSWORD_INVALID`): at least 8 characters and at most 72 bytes.
+- **`changePassword` uses the same password rules** and checks the password before the token,
+  so a refused password does not use up the token.
+- **`changePassword` ends all sessions of the user.** Anyone who knew the old password is
+  logged out. The user has to log in again.
+- **Usernames and emails ignore letter case.** `Maija` and `maija` are one user.
+  `registerUser` throws `USER_ALREADYEXISTS` for a name or email that differs only in case.
+  `loginUser` accepts any letter case and returns the name as it was registered.
+- **Email login and password reset tokens are stored as bcrypt hashes.** The functions work
+  as before. Tokens that were stored before stop working (they expire in 15 or 45 minutes
+  anyway). Code that reads the `auth_token` table with `WHERE token = ?` finds nothing.
+  Use `getAuthToken(token_id, type)`. bcrypt reads only the first 72 bytes of a token.
+
+### Added
+
+- `getAuthToken(token_id, type)`: finds an unused, unexpired token by its public `token_id`
+  and returns `{ user_id, session_id, created }`. Put `token_id` in the link next to the
+  secret token.
+- `getUserByLogin(username, email)`: finds an active user by both values, ignoring letter
+  case, and returns `{ user_id, username, email }`.
+- `deleteUserSessions(user_id)`: ends all sessions of a user and returns how many.
+- `createSession` and `userExists` are exported from the main entry.
+- Error constants `USERNAME_INVALID`, `EMAIL_INVALID` and `PASSWORD_INVALID`.
+
+### Fixed
+
+- Session expiry was off by the server's time zone offset. SQLite stores UTC and the module
+  read it as local time. A session now lasts 24 hours on any server.
+- 2FA codes were made with `Math.random`. They now use `crypto.randomInt`.
+- The README is rewritten to describe how the module works now.
+
+### Database
+
+- Schema version 4: the columns `user.username_key` and `user.email_key`, filled by the
+  module from the username and email (lower case, Unicode NFKC), with a unique index on each.
+  Existing users get their keys during the upgrade. Names that differ only in case, and
+  that already exist, skip the index with a warning, as for the other unique indexes.
+- The upgrade is applied automatically, and the backup `VIIXET_AUTHN.db.bak-v3` is made first.
+
+### Upgrading from 2.0
+
+1. Update and run `npm install`. The database is upgraded, and the backup is made.
+2. If you read `auth_token` yourself, for example to find the user of a reset link, change the
+   link to carry `token_id` and the token, and call `getAuthToken(token_id, type)`.
+3. Handle `USERNAME_INVALID`, `EMAIL_INVALID` and `PASSWORD_INVALID` in your registration
+   and password reset routes. Users who registered before keep working.
+4. After a password reset the user has no session. Send them to the login page.
+5. Watch the start-up output for a duplicate-index warning and fix the rows it lists.
+
 ## 2.0.0 - 2026-10-16
 
 ### Breaking changes
