@@ -244,6 +244,50 @@ function ageToken(token_id, minutes) {
     })
 }
 
+function ageSession(session_id, hours) {
+    return new Promise((resolve, reject) => {
+        const db = new sqlite3.Database(path.join(tmp, 'VIIXET_AUTHN.db'))
+
+        db.run(
+            `UPDATE session SET modified = datetime('now', ?) WHERE session_id = ?`,
+            [`-${hours} hours`, session_id],
+            err => {
+                db.close()
+                err ? reject(err) : resolve()
+            }
+        )
+    })
+}
+
+// The stored time is UTC, so the 24 hour limit must not move with the server's zone
+for (const zone of ['UTC', 'Europe/Helsinki', 'America/New_York']) {
+    test(`session lasts 24 hours in time zone ${ zone }`, async () => {
+        const previous = process.env.TZ
+        process.env.TZ = zone
+
+        try {
+            const user_id = await lib.registerUser(
+                `tz-${ zone.replace('/', '-').toLowerCase() }`,
+                'secret',
+                `tz-${ zone.replace('/', '-').toLowerCase() }@example.com`
+            )
+            const young = await createSession(user_id, 1)
+            const old = await createSession(user_id, 1)
+
+            await ageSession(young, 23)
+            await ageSession(old, 25)
+
+            assert.ok(await lib.authenticate(young))
+            await assert.rejects(
+                lib.authenticate(old),
+                { message: lib.VIIXET_AUTHN_ERRORS.SESSION_EXPIRED }
+            )
+        } finally {
+            previous === undefined ? delete process.env.TZ : process.env.TZ = previous
+        }
+    })
+}
+
 async function tokenId(token, type) {
     const { transaction } = await import('../db/transaction.js')
     const { rows } = await transaction(

@@ -125,7 +125,10 @@ export async function authenticate(session_id, { allowInactive = false } = {}) {
     if (rows.length === 0) throw new Error(ERRORS.SESSION_NOTFOUND)
 
     const { user_id, username, active, modified } = rows[0]
-    const sessionExpires = new Date(modified).getTime() + (24 * 3_600_000) // default 24 hours
+    // SQLite stores CURRENT_TIMESTAMP as UTC text without a zone. Without the 'Z',
+    // Date reads it as the server's local time and expiry moves by the zone offset.
+    const modifiedAt = new Date(modified.replace(' ', 'T') + 'Z').getTime()
+    const sessionExpires = modifiedAt + (24 * 3_600_000) // default 24 hours
 
     if (Date.now() > sessionExpires) throw new Error(ERRORS.SESSION_EXPIRED)
     if (!active && !allowInactive) throw new Error(ERRORS.SESSION_INACTIVE)
