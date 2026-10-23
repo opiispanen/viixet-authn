@@ -5,6 +5,7 @@ import { transaction } from '../db/transaction.js'
 import { activateSession, deleteUserSessions } from './session.js'
 import { hitRateLimit } from './rateLimit.js'
 import { ERRORS } from './errors.js'
+import { isValidPassword } from './validate.js'
 
 export const AUTH_TOKEN_TYPE = {
     twoFactor: 1,
@@ -207,7 +208,11 @@ export async function createPasswordRenewalToken(token, user_id, session_id) {
     return { token_id }
 }
 
+// The password has the same rules as in registerUser. It is checked before the token
+// is looked at, so a password that is refused doesn't use up the token.
 export async function changePassword(password, token, user_id, session_id) {
+    if (!isValidPassword(password)) throw new Error(ERRORS.PASSWORD_INVALID)
+
     const hashedPassword = await bcrypt.hash(password, 10)
     const token_id = await findUnusedToken(AUTH_TOKEN_TYPE.passwordRenewal, token, user_id, session_id)
 

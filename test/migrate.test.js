@@ -172,7 +172,10 @@ test('a new database gets unique indexes on username and email', async () => {
         `SELECT name FROM sqlite_master WHERE type = 'index' AND name LIKE 'idx_user_%' ORDER BY name`
     )).map(row => row.name)
 
-    assert.deepEqual(indexes, ['idx_user_email', 'idx_user_username'])
+    assert.deepEqual(
+        indexes,
+        ['idx_user_email', 'idx_user_email_key', 'idx_user_username', 'idx_user_username_key']
+    )
 
     await query(
         `INSERT INTO user (user_id, username, password, email, extra) VALUES (?, ?, ?, ?, ?)`,
@@ -216,24 +219,66 @@ test('duplicates skip the index with one warning, and it is added once they are 
     await migrate()
     await migrate()
 
-    // The username index is made, the email index waits, and the data is untouched
-    assert.deepEqual(await indexNames(), ['idx_user_username'])
+    // The username indexes are made, the email indexes wait, and the data is untouched
+    assert.deepEqual(await indexNames(), ['idx_user_username', 'idx_user_username_key'])
     assert.equal((await query('SELECT * FROM user')).length, 2)
 
-    // Warned once, with the value and where to look
-    assert.equal(warn.mock.callCount(), 1)
+    // Warned once for each email index, with the value and where to look
+    assert.equal(warn.mock.callCount(), 2)
 
-    const message = warn.mock.calls[0].arguments[0]
+    const [exact, ignoringCase] = warn.mock.calls.map(call => call.arguments[0])
 
-    assert.match(message, /user\.email/)
-    assert.match(message, /"yhteinen@example\.com" \(2 rows\)/)
-    assert.match(message, /SELECT user_id/)
+    assert.match(exact, /user\.email,/)
+    assert.match(exact, /"yhteinen@example\.com" \(2 rows\)/)
+    assert.match(exact, /SELECT user_id/)
+    assert.match(ignoringCase, /user\.email_key/)
 
     await query('DELETE FROM user WHERE user_id = ?', ['id-2'])
     await migrate()
 
-    assert.deepEqual(await indexNames(), ['idx_user_email', 'idx_user_username'])
+    assert.deepEqual(
+        await indexNames(),
+        ['idx_user_email', 'idx_user_email_key', 'idx_user_username', 'idx_user_username_key']
+    )
+    assert.equal(warn.mock.callCount(), 2)
+})
+
+test('existing users get a name key, and names that differ only in case wait for the index', async t => {
+    reset()
+    await exec(SCHEMA_1_0_0)
+
+    const insert = (id, username, email) => query(
+        `INSERT INTO user (user_id, username, password, email, extra) VALUES (?, ?, ?, ?, ?)`,
+        [id, username, 'hash', email, '{}']
+    )
+
+    await insert('id-1', 'Äiti', 'Aiti@Example.com')
+    await insert('id-2', 'Esa', 'esa@example.com')
+    await insert('id-3', 'esa', 'toinen@example.com')
+
+    const warn = t.mock.method(console, 'warn', () => {})
+
+    await migrate()
+
+    // The spelling is kept and the key is lower case, also for non-ASCII letters
+    assert.deepEqual(
+        await query('SELECT user_id, username, username_key, email_key FROM user ORDER BY user_id'),
+        [
+            { user_id: 'id-1', username: 'Äiti', username_key: 'äiti', email_key: 'aiti@example.com' },
+            { user_id: 'id-2', username: 'Esa', username_key: 'esa', email_key: 'esa@example.com' },
+            { user_id: 'id-3', username: 'esa', username_key: 'esa', email_key: 'toinen@example.com' },
+        ]
+    )
+
+    // `Esa` and `esa` were two users before, so that index waits and nothing is deleted
+    const indexes = (await query(
+        `SELECT name FROM sqlite_master WHERE type = 'index' AND name LIKE 'idx_user_%' ORDER BY name`
+    )).map(row => row.name)
+
+    assert.ok(!indexes.includes('idx_user_username_key'))
+    assert.ok(indexes.includes('idx_user_email_key'))
     assert.equal(warn.mock.callCount(), 1)
+    assert.match(warn.mock.calls[0].arguments[0], /"esa" \(2 rows\)/)
 })
 
 test('a database from a newer library is refused', async () => {

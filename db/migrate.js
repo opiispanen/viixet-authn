@@ -1,6 +1,7 @@
 import fs from 'fs'
 import sqlite3 from 'sqlite3'
 import { dbPath } from './config.js'
+import { nameKey } from '../src/normalize.js'
 
 // The schema version is stored in the database itself (PRAGMA user_version) and
 // equals the number of steps that have run. A database made by version 1.0.0 of
@@ -67,6 +68,29 @@ export const MIGRATIONS = [
         )`)
 
         await run('CREATE INDEX IF NOT EXISTS idx_rate_limit_window ON rate_limit(window_start)')
+    },
+
+    // 4: the form of the username and email that is used for comparing them (see
+    // src/normalize.js), so names that differ only in letter case are one user.
+    // The spelling in `username` and `email` is kept. Rows that exist already get
+    // their key from their own values.
+    async ({ run, all }) => {
+        const columns = (await all('PRAGMA table_info(user)')).map(column => column.name)
+
+        for (const column of ['username_key', 'email_key']) {
+            if (!columns.includes(column)) {
+                await run(`ALTER TABLE user ADD COLUMN ${column} TEXT`)
+            }
+        }
+
+        const users = await all('SELECT user_id, username, email FROM user')
+
+        for (const { user_id, username, email } of users) {
+            await run(
+                'UPDATE user SET username_key = ?, email_key = ? WHERE user_id = ?',
+                [nameKey(username), nameKey(email), user_id]
+            )
+        }
     },
 ]
 
@@ -157,6 +181,9 @@ async function applyMigrations(sql) {
 const UNIQUE_INDEXES = [
     { name: 'idx_user_username', table: 'user', column: 'username' },
     { name: 'idx_user_email', table: 'user', column: 'email' },
+    // Same as above, but ignoring letter case
+    { name: 'idx_user_username_key', table: 'user', column: 'username_key' },
+    { name: 'idx_user_email_key', table: 'user', column: 'email_key' },
 ]
 const MAX_LISTED_DUPLICATES = 10
 const warnedIndexes = new Set()

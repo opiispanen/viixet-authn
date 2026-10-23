@@ -16,7 +16,7 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'viixet-authn-'))
 process.env.INIT_CWD = tmp
 delete process.env.VIIXET_AUTHN_DB
 
-let lib, createSession, activateSession
+let lib, createSession, activateSession, userExists
 
 before(async () => {
     execFileSync(process.execPath, [path.join(root, 'db/createDB.js')], {
@@ -27,13 +27,14 @@ before(async () => {
     // Imported after INIT_CWD is set, because the db path is read at import time
     lib = await import('../src/index.js')
     ;({ createSession, activateSession } = await import('../src/session.js'))
+    ;({ userExists } = await import('../src/user.js'))
 })
 
 after(() => fs.rmSync(tmp, { recursive: true, force: true }))
 
 test('register, login, authenticate and logout', async () => {
-    const user_id = await lib.registerUser('hilma', 'secret', 'hilma@example.com')
-    const { session_id } = await lib.loginUser('hilma', 'secret')
+    const user_id = await lib.registerUser('hilma', 'secret-password', 'hilma@example.com')
+    const { session_id } = await lib.loginUser('hilma', 'secret-password')
     const session = await lib.authenticate(session_id)
 
     assert.equal(session.user_id, user_id)
@@ -46,8 +47,71 @@ test('register, login, authenticate and logout', async () => {
     )
 })
 
+test('names that differ only in letter case are one user', async () => {
+    await lib.registerUser('Maija', 'secret-password', 'Maija@Example.com')
+
+    await assert.rejects(
+        lib.registerUser('maija', 'secret-password', 'muu@example.com'),
+        { message: lib.VIIXET_AUTHN_ERRORS.USER_ALREADYEXISTS }
+    )
+    await assert.rejects(
+        lib.registerUser('MAIJA', 'secret-password', 'muu@example.com'),
+        { message: lib.VIIXET_AUTHN_ERRORS.USER_ALREADYEXISTS }
+    )
+    await assert.rejects(
+        lib.registerUser('toinenmaija', 'secret-password', 'MAIJA@example.com'),
+        { message: lib.VIIXET_AUTHN_ERRORS.USER_ALREADYEXISTS }
+    )
+
+    assert.equal(await userExists('MAIJA'), true)
+    assert.equal(await userExists('nobody', 'MAIJA@EXAMPLE.COM'), true)
+    assert.equal(await userExists('nobody', 'nobody@example.com'), false)
+})
+
+test('registerUser refuses input in the wrong format and stores nothing', async () => {
+    const { VIIXET_AUTHN_ERRORS: ERRORS } = lib
+    const good = ['formatuser', 'secret-password', 'formatuser@example.com']
+    const cases = [
+        [['ab', good[1], good[2]], ERRORS.USERNAME_INVALID],
+        [['Östen', good[1], good[2]], ERRORS.USERNAME_INVALID],
+        [['format🍺user', good[1], good[2]], ERRORS.USERNAME_INVALID],
+        [['format user', good[1], good[2]], ERRORS.USERNAME_INVALID],
+        [[undefined, good[1], good[2]], ERRORS.USERNAME_INVALID],
+        [[good[0], good[1], 'x'], ERRORS.EMAIL_INVALID],
+        [[good[0], good[1], 'format@user'], ERRORS.EMAIL_INVALID],
+        [[good[0], good[1], 'färm@example.com'], ERRORS.EMAIL_INVALID],
+        [[good[0], 'short', good[2]], ERRORS.PASSWORD_INVALID],
+        [[good[0], 'x'.repeat(73), good[2]], ERRORS.PASSWORD_INVALID],
+        [[good[0], undefined, good[2]], ERRORS.PASSWORD_INVALID],
+    ]
+
+    for (const [args, message] of cases) {
+        await assert.rejects(lib.registerUser(...args), { message })
+    }
+
+    assert.equal(await userExists('formatuser', 'formatuser@example.com'), false)
+
+    // The username and email are trimmed before they are checked and stored
+    const user_id = await lib.registerUser('  formatuser ', good[1], ' formatuser@example.com  ')
+    const login = await lib.loginUser('formatuser', good[1])
+
+    assert.equal(login.user_id, user_id)
+    assert.equal(login.username, 'formatuser')
+})
+
+test('login ignores letter case and returns the name as it was registered', async () => {
+    const user_id = await lib.registerUser('PekkaPouta', 'secret-password', 'pekka@example.com')
+
+    for (const typed of ['PekkaPouta', 'pekkapouta', 'PEKKAPOUTA']) {
+        const login = await lib.loginUser(typed, 'secret-password')
+
+        assert.equal(login.user_id, user_id)
+        assert.equal(login.username, 'PekkaPouta')
+    }
+})
+
 test('wrong password is rejected', async () => {
-    await lib.registerUser('taavetti', 'secret', 'taavetti@example.com')
+    await lib.registerUser('taavetti', 'secret-password', 'taavetti@example.com')
 
     await assert.rejects(
         lib.loginUser('taavetti', 'wrong'),
@@ -56,22 +120,22 @@ test('wrong password is rejected', async () => {
 })
 
 test('duplicate username and duplicate email are rejected', async () => {
-    await lib.registerUser('kaisa', 'secret', 'kaisa@example.com')
+    await lib.registerUser('kaisa', 'secret-password', 'kaisa@example.com')
 
     await assert.rejects(
-        lib.registerUser('kaisa', 'secret', 'muu@example.com'),
+        lib.registerUser('kaisa', 'secret-password', 'muu@example.com'),
         { message: lib.VIIXET_AUTHN_ERRORS.USER_ALREADYEXISTS }
     )
     await assert.rejects(
-        lib.registerUser('kaisa2', 'secret', 'kaisa@example.com'),
+        lib.registerUser('kaisa2', 'secret-password', 'kaisa@example.com'),
         { message: lib.VIIXET_AUTHN_ERRORS.USER_ALREADYEXISTS }
     )
 })
 
 test('two registrations at the same moment create only one user', async () => {
     const results = await Promise.allSettled([
-        lib.registerUser('seppo', 'secret', 'seppo@example.com'),
-        lib.registerUser('seppo', 'secret', 'seppo@example.com'),
+        lib.registerUser('seppo', 'secret-password', 'seppo@example.com'),
+        lib.registerUser('seppo', 'secret-password', 'seppo@example.com'),
     ])
 
     assert.equal(results.filter(result => result.status === 'fulfilled').length, 1)
@@ -82,7 +146,7 @@ test('two registrations at the same moment create only one user', async () => {
 })
 
 test('login is limited to 10 attempts per username, even with the right password', async () => {
-    await lib.registerUser('aapeli', 'secret', 'aapeli@example.com')
+    await lib.registerUser('aapeli', 'secret-password', 'aapeli@example.com')
 
     for (let i = 0; i < 10; i++) {
         await assert.rejects(
@@ -92,7 +156,7 @@ test('login is limited to 10 attempts per username, even with the right password
     }
 
     await assert.rejects(
-        lib.loginUser('aapeli', 'secret'),
+        lib.loginUser('aapeli', 'secret-password'),
         error => {
             assert.equal(error.message, lib.VIIXET_AUTHN_ERRORS.RATE_LIMITED)
             assert.ok(error.retryAfter >= 1 && error.retryAfter <= 900)
@@ -105,19 +169,19 @@ test('login is limited to 10 attempts per username, even with the right password
 test('unknown usernames are limited too', async () => {
     for (let i = 0; i < 10; i++) {
         await assert.rejects(
-            lib.loginUser('tuntematon', 'secret'),
+            lib.loginUser('tuntematon', 'secret-password'),
             { message: lib.VIIXET_AUTHN_ERRORS.USER_NOTFOUND }
         )
     }
 
     await assert.rejects(
-        lib.loginUser('tuntematon', 'secret'),
+        lib.loginUser('tuntematon', 'secret-password'),
         { message: lib.VIIXET_AUTHN_ERRORS.RATE_LIMITED }
     )
 })
 
 test('a successful login clears the username counter', async () => {
-    await lib.registerUser('maiju', 'secret', 'maiju@example.com')
+    await lib.registerUser('maiju', 'secret-password', 'maiju@example.com')
 
     for (let i = 0; i < 9; i++) {
         await assert.rejects(
@@ -126,7 +190,7 @@ test('a successful login clears the username counter', async () => {
         )
     }
 
-    assert.ok((await lib.loginUser('maiju', 'secret')).session_id)
+    assert.ok((await lib.loginUser('maiju', 'secret-password')).session_id)
 
     // 10 more wrong attempts are allowed, which would not be the case without the reset
     for (let i = 0; i < 10; i++) {
@@ -140,25 +204,25 @@ test('a successful login clears the username counter', async () => {
 test('login is limited per address when ip is given', async () => {
     for (let i = 0; i < 30; i++) {
         await assert.rejects(
-            lib.loginUser(`vieras${i}`, 'secret', { ip: '10.0.0.1' }),
+            lib.loginUser(`vieras${i}`, 'secret-password', { ip: '10.0.0.1' }),
             { message: lib.VIIXET_AUTHN_ERRORS.USER_NOTFOUND }
         )
     }
 
     await assert.rejects(
-        lib.loginUser('vieras-uusi', 'secret', { ip: '10.0.0.1' }),
+        lib.loginUser('vieras-uusi', 'secret-password', { ip: '10.0.0.1' }),
         { message: lib.VIIXET_AUTHN_ERRORS.RATE_LIMITED }
     )
 
     // another address is not affected
     await assert.rejects(
-        lib.loginUser('vieras-uusi', 'secret', { ip: '10.0.0.2' }),
+        lib.loginUser('vieras-uusi', 'secret-password', { ip: '10.0.0.2' }),
         { message: lib.VIIXET_AUTHN_ERRORS.USER_NOTFOUND }
     )
 })
 
 test('rateLimit: false turns login limiting off', async () => {
-    await lib.registerUser('ville', 'secret', 'ville@example.com')
+    await lib.registerUser('ville', 'secret-password', 'ville@example.com')
 
     for (let i = 0; i < 12; i++) {
         await assert.rejects(
@@ -167,11 +231,11 @@ test('rateLimit: false turns login limiting off', async () => {
         )
     }
 
-    assert.ok((await lib.loginUser('ville', 'secret', { rateLimit: false })).session_id)
+    assert.ok((await lib.loginUser('ville', 'secret-password', { rateLimit: false })).session_id)
 })
 
 test('2FA code requests are limited to 5 per session', async () => {
-    const user_id = await lib.registerUser('pietari', 'secret', 'pietari@example.com')
+    const user_id = await lib.registerUser('pietari', 'secret-password', 'pietari@example.com')
     const session_id = await createSession(user_id, 0)
     const other_session = await createSession(user_id, 0)
 
@@ -195,8 +259,8 @@ test('2FA code requests are limited to 5 per session', async () => {
 })
 
 test('login with a second step gives an inactive session that authenticate rejects', async () => {
-    const user_id = await lib.registerUser('lyydia', 'secret', 'lyydia@example.com')
-    const { session_id } = await lib.loginUser('lyydia', 'secret', { requireSecondStep: true })
+    const user_id = await lib.registerUser('lyydia', 'secret-password', 'lyydia@example.com')
+    const { session_id } = await lib.loginUser('lyydia', 'secret-password', { requireSecondStep: true })
 
     await assert.rejects(
         lib.authenticate(session_id),
@@ -214,14 +278,14 @@ test('login with a second step gives an inactive session that authenticate rejec
 })
 
 test('a normal login still gives an active session', async () => {
-    await lib.registerUser('juho', 'secret', 'juho@example.com')
-    const { session_id } = await lib.loginUser('juho', 'secret')
+    await lib.registerUser('juho', 'secret-password', 'juho@example.com')
+    const { session_id } = await lib.loginUser('juho', 'secret-password')
 
     assert.equal((await lib.authenticate(session_id)).active, 1)
 })
 
 test('activateSession and logoutUser report whether a row changed', async () => {
-    const user_id = await lib.registerUser('efraim', 'secret', 'efraim@example.com')
+    const user_id = await lib.registerUser('efraim', 'secret-password', 'efraim@example.com')
     const session_id = await createSession(user_id, 0)
 
     assert.equal(await activateSession(session_id), true)
@@ -269,7 +333,7 @@ for (const zone of ['UTC', 'Europe/Helsinki', 'America/New_York']) {
         try {
             const user_id = await lib.registerUser(
                 `tz-${ zone.replace('/', '-').toLowerCase() }`,
-                'secret',
+                'secret-password',
                 `tz-${ zone.replace('/', '-').toLowerCase() }@example.com`
             )
             const young = await createSession(user_id, 1)
@@ -305,7 +369,7 @@ async function tokenId(token, type) {
 }
 
 test('email login and reset tokens are stored as hashes', async () => {
-    const user_id = await lib.registerUser('lyyli', 'secret', 'lyyli@example.com')
+    const user_id = await lib.registerUser('lyyli', 'secret-password', 'lyyli@example.com')
     const login_session = await createSession(user_id, 0)
     const reset_session = await createSession(user_id, 0)
     const { transaction } = await import('../db/transaction.js')
@@ -341,7 +405,7 @@ test('email login and reset tokens are stored as hashes', async () => {
 })
 
 test('2FA code expires after 15 minutes', async () => {
-    const user_id = await lib.registerUser('impi', 'secret', 'impi@example.com')
+    const user_id = await lib.registerUser('impi', 'secret-password', 'impi@example.com')
     const session_id = await createSession(user_id, 0)
     const fresh = await lib.createTwoFactorCode(user_id, session_id)
     const old = await lib.createTwoFactorCode(user_id, session_id)
@@ -359,7 +423,7 @@ test('2FA code expires after 15 minutes', async () => {
 })
 
 test('email login link expires after 15 minutes', async () => {
-    const user_id = await lib.registerUser('aukusti', 'secret', 'aukusti@example.com')
+    const user_id = await lib.registerUser('aukusti', 'secret-password', 'aukusti@example.com')
     const fresh_session = await createSession(user_id, 0)
     const old_session = await createSession(user_id, 0)
 
@@ -381,7 +445,7 @@ test('email login link expires after 15 minutes', async () => {
 })
 
 test('password reset link lasts 45 minutes', async () => {
-    const user_id = await lib.registerUser('kaarlo', 'secret', 'kaarlo@example.com')
+    const user_id = await lib.registerUser('kaarlo', 'secret-password', 'kaarlo@example.com')
     const ok_session = await createSession(user_id, 0)
     const late_session = await createSession(user_id, 0)
 
@@ -407,11 +471,28 @@ test('password reset link lasts 45 minutes', async () => {
     assert.ok((await lib.loginUser('kaarlo', 'new-secret')).session_id)
 })
 
+test('changePassword refuses a weak password and keeps the token for a good one', async () => {
+    const user_id = await lib.registerUser('weakreset', 'secret-password', 'weakreset@example.com')
+    const session_id = await createSession(user_id, 0)
+
+    await lib.createPasswordRenewalToken('weakreset-token', user_id, session_id)
+
+    await assert.rejects(
+        lib.changePassword('short', 'weakreset-token', user_id, session_id),
+        { message: lib.VIIXET_AUTHN_ERRORS.PASSWORD_INVALID }
+    )
+    assert.equal(
+        await lib.changePassword('a-better-password', 'weakreset-token', user_id, session_id),
+        true
+    )
+    assert.ok((await lib.loginUser('weakreset', 'a-better-password')).session_id)
+})
+
 test('changePassword ends all of the user\'s sessions, and only theirs', async () => {
-    const user_id = await lib.registerUser('veikko', 'secret', 'veikko@example.com')
-    await lib.registerUser('aino', 'secret', 'aino@example.com')
-    const { session_id: stolen } = await lib.loginUser('veikko', 'secret')
-    const { session_id: other } = await lib.loginUser('aino', 'secret')
+    const user_id = await lib.registerUser('veikko', 'secret-password', 'veikko@example.com')
+    await lib.registerUser('aino', 'secret-password', 'aino@example.com')
+    const { session_id: stolen } = await lib.loginUser('veikko', 'secret-password')
+    const { session_id: other } = await lib.loginUser('aino', 'secret-password')
     const reset_session = await createSession(user_id, 0)
 
     await lib.createPasswordRenewalToken('veikko-reset-token', user_id, reset_session)
@@ -425,16 +506,16 @@ test('changePassword ends all of the user\'s sessions, and only theirs', async (
 })
 
 test('deleteUserSessions returns how many sessions it ended', async () => {
-    const user_id = await lib.registerUser('onni', 'secret', 'onni@example.com')
-    await lib.loginUser('onni', 'secret')
-    await lib.loginUser('onni', 'secret')
+    const user_id = await lib.registerUser('onni', 'secret-password', 'onni@example.com')
+    await lib.loginUser('onni', 'secret-password')
+    await lib.loginUser('onni', 'secret-password')
 
     assert.equal(await lib.deleteUserSessions(user_id), 2)
     assert.equal(await lib.deleteUserSessions(user_id), 0)
 })
 
 test('2FA code is spent after 5 wrong guesses', async () => {
-    const user_id = await lib.registerUser('siiri', 'secret', 'siiri@example.com')
+    const user_id = await lib.registerUser('siiri', 'secret-password', 'siiri@example.com')
     const session_id = await createSession(user_id, 0)
     const { token_id, numbers } = await lib.createTwoFactorCode(user_id, session_id)
     const wrong = numbers.map(n => (n + 1) % 10)
@@ -458,7 +539,7 @@ test('2FA code is spent after 5 wrong guesses', async () => {
 })
 
 test('2FA code still works after 4 wrong guesses', async () => {
-    const user_id = await lib.registerUser('elli', 'secret', 'elli@example.com')
+    const user_id = await lib.registerUser('elli', 'secret-password', 'elli@example.com')
     const session_id = await createSession(user_id, 0)
     const { token_id, numbers } = await lib.createTwoFactorCode(user_id, session_id)
     const wrong = numbers.map(n => (n + 1) % 10)
@@ -477,7 +558,7 @@ test('2FA code still works after 4 wrong guesses', async () => {
 })
 
 test('two factor code activates a pending session', async () => {
-    const user_id = await lib.registerUser('tyyne', 'secret', 'tyyne@example.com')
+    const user_id = await lib.registerUser('tyyne', 'secret-password', 'tyyne@example.com')
     const session_id = await createSession(user_id, 0)
 
     assert.equal((await lib.authenticate(session_id, { allowInactive: true })).active, 0)

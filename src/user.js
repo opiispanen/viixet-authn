@@ -5,6 +5,8 @@ import { createHash } from 'node:crypto'
 import { createSession, deleteSession } from './session.js'
 import { hitRateLimit, resetRateLimit } from './rateLimit.js'
 import { ERRORS } from './errors.js'
+import { nameKey } from './normalize.js'
+import { trimmed, isValidUsername, isValidEmail, isValidPassword } from './validate.js'
 
 // Login attempts per username (reset by a successful login) and per address
 const LOGIN_USER_LIMIT = { max: 10, windowSeconds: 900 }
@@ -12,19 +14,30 @@ const LOGIN_IP_LIMIT = { max: 30, windowSeconds: 900 }
 
 // The username is hashed so it stays out of the table and the key is always short
 function loginUserKey(username) {
-    const hash = createHash('sha256').update(String(username).toLowerCase()).digest('hex')
+    const hash = createHash('sha256').update(nameKey(username)).digest('hex')
 
     return `login:user:${hash}`
 }
 
+// Letter case doesn't matter: `Otto` and `otto` are the same user
 export async function userExists(username, email = username) {
-    const query = 'SELECT user_id FROM user WHERE username = ? OR email = ? LIMIT 1'
-    const { rows } = await transaction(query, [username, email])
-    
+    const query = 'SELECT user_id FROM user WHERE username_key = ? OR email_key = ? LIMIT 1'
+    const { rows } = await transaction(query, [nameKey(username), nameKey(email)])
+
     return rows.length > 0
 }
 
+// The username and email are trimmed, and the values are stored trimmed. Input that
+// doesn't pass the format rules (see src/validate.js) throws USERNAME_INVALID,
+// EMAIL_INVALID or PASSWORD_INVALID, and nothing is stored.
 export async function registerUser(username, password, email) {
+    username = trimmed(username)
+    email = trimmed(email)
+
+    if (!isValidUsername(username)) throw new Error(ERRORS.USERNAME_INVALID)
+    if (!isValidEmail(email)) throw new Error(ERRORS.EMAIL_INVALID)
+    if (!isValidPassword(password)) throw new Error(ERRORS.PASSWORD_INVALID)
+
     const exists = await userExists(username, email)
 
     if (exists) throw new Error(ERRORS.USER_ALREADYEXISTS)
@@ -32,8 +45,8 @@ export async function registerUser(username, password, email) {
     const userId = uuidv4()
     const hashedPassword = await bcrypt.hash(password, 10)
     const query = `
-        INSERT INTO user (user_id, username, password, email, extra) 
-        VALUES (?, ?, ?, ?, ?)
+        INSERT INTO user (user_id, username, password, email, extra, username_key, email_key)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
     `
     let result
 
@@ -45,7 +58,9 @@ export async function registerUser(username, password, email) {
                 username,
                 hashedPassword,
                 email,
-                '{}'
+                '{}',
+                nameKey(username),
+                nameKey(email)
             ]
         )
     } catch (err) {
@@ -84,13 +99,14 @@ export async function loginUser(
         await hitRateLimit(userKey, LOGIN_USER_LIMIT)
     }
 
-    const query = 'SELECT user_id, username, password FROM user WHERE deleted = 0 AND username = ? LIMIT 1'
-    const { rows } = await transaction(query, [username])
+    const query = 'SELECT user_id, username, password FROM user WHERE deleted = 0 AND username_key = ? LIMIT 1'
+    const { rows } = await transaction(query, [nameKey(username)])
 
     if (rows.length === 0) throw new Error(ERRORS.USER_NOTFOUND)
 
     const [ user ] = rows
-    const { user_id, password: hashedPassword } = user
+    // The name as it was registered, which can differ from the typed one in letter case
+    const { user_id, username: registeredUsername, password: hashedPassword } = user
     const match = await bcrypt.compare(password, hashedPassword)
     
     if (!match) throw new Error(ERRORS.CREDENTIALS_INVALID)
@@ -100,7 +116,7 @@ export async function loginUser(
 
     const session_id = await createSession(user_id, requireSecondStep ? 0 : 1)
 
-    return { session_id, user_id, username }
+    return { session_id, user_id, username: registeredUsername }
 }
 
 export async function logoutUser(session_id) {

@@ -49,7 +49,9 @@ The module keeps its data in one SQLite file in your project root, named `VIIXET
 - **Location:** set `VIIXET_AUTHN_DB` in your environment or in a `.env` file in the project root to use another name. A relative name is placed in the project root and an absolute path is used as it is. A value that is already set in the real environment wins over `.env`. If you use `.env`, create it before running `npm install`, because the database is created at install time.
 - **Setup and upgrades:** `npm install` creates the database. The schema has a version number, which is stored in the database file (`PRAGMA user_version`). When a newer version of the module needs schema changes, they are applied automatically, at install time or on the first query after the upgrade. Existing users and sessions are kept.
 - **Backup:** before the first upgrade of an existing database, the file is copied to `VIIXET_AUTHN.db.bak-v<old version>` next to it. The copy is made once and never overwritten. It's safe to delete after you have checked that everything works.
-- **Unique usernames and emails:** the database has unique indexes on `user.username` and `user.email`, so two users can't end up with the same value even if they register at the same moment. The match is exact, so `Esa` and `esa` are still different users. If an existing database already has duplicates, which older versions allowed for email, the index for that column can't be created. The module then keeps working, prints one warning at startup that lists the duplicate values, and adds the index automatically on a later start once you have removed or changed the duplicates. To look at the rows: `SELECT user_id, username, email, created, deleted FROM user WHERE email = '<value>';`
+- **Unique usernames and emails:** two users can't have the same username or email, even if they register at the same moment. Letter case doesn't matter. `Maija` and `maija` are one user, and so are `Östen` and `östen`. The name is shown as the user typed it when they registered, and login works with any letter case. Names that only look alike, such as `Maija` and `Maiya`, are different users. If some names must stay unique, such as official accounts, your app has to check them.
+- **How the check works:** the module keeps a lower case copy of each username and email in the columns `username_key` and `email_key`, and compares that copy. Don't write to these columns. SQLite's own `LOWER()` only changes the letters A to Z, so the module does it in JavaScript.
+- **Duplicates in the data:** if the table already has two users with the same email, or with usernames that differ only in letter case, the unique index for that column can't be created. The module keeps working and prints one warning at startup that lists the duplicates. Remove or change them and the index is added on the next start. Until then, new duplicates are not stopped. To look at the rows: `SELECT user_id, username, email, created, deleted FROM user WHERE username_key = '<value>';` (or `email_key`).
 - **Concurrent writes:** SQLite lets one writer in at a time. A query that has to wait for another write waits up to 5 seconds instead of failing straight away.
 - **Newer database:** if the database was upgraded by a newer version of the module, an older version refuses to use it and tells you to update.
 
@@ -88,7 +90,11 @@ Things to know:
 - The session id is the proof of login. Treat it like a password and never put it in a URL.
 - A session lasts 24 hours from login. It isn't extended when it is used.
 - `authenticate` only accepts fully logged-in sessions. A session that is waiting for a second step (see below) is rejected with `SESSION_INACTIVE`.
-- `registerUser` throws `USER_ALREADYEXISTS` if the username or the email is already in use. Check the password rules yourself, because the module doesn't.
+- `registerUser` throws `USER_ALREADYEXISTS` if the username or the email is already in use.
+- `registerUser` also checks the format of what it gets, and stores nothing if it is wrong. Spaces at the start and end of the username and email are removed first.
+  - **Username** (`USERNAME_INVALID`): 3 to 64 characters. Letters `a-z`, digits, `_` and `-`, and dots between them (not first, not last, not two in a row). No accents, emoji or spaces.
+  - **Email** (`EMAIL_INVALID`): the usual form of an address, as in RFC 5322: ASCII only, at most 254 characters and at most 64 before the `@`, and a domain with a dot. This checks the shape only. It does not check that the address exists. To know that the user owns it, send them an email.
+  - **Password** (`PASSWORD_INVALID`): at least 8 characters and at most 72 bytes, which is a limit of bcrypt. There are no rules about letters, digits or symbols. `changePassword` uses the same rules.
 - `loginUser` limits attempts: 10 per username in 15 minutes, and a successful login starts the count again. When there are too many it throws `RATE_LIMITED` before looking at the password, and `error.retryAfter` has the seconds to wait. Unknown usernames are counted too, so the limit doesn't reveal which usernames exist.
 - Pass the client address as `loginUser(username, password, { ip })` to also limit attempts per address (30 in 15 minutes). The module can't see the address itself. Behind a proxy, pass the real client address and not the proxy's.
 - Handle `RATE_LIMITED` in your login route, for example by answering with HTTP 429 and a `Retry-After` header. See [rate limiting](#rate-limiting). If you do your own limiting, `{ rateLimit: false }` turns the built-in one off.
@@ -189,6 +195,7 @@ Keys the module uses itself: `login:user:<hash of the username>`, `login:ip:<add
 |---|---|
 | `RATE_LIMITED` | Too many login attempts, 2FA code requests or hits for a rate limit key. `error.retryAfter` has the seconds to wait |
 | `USER_ALREADYEXISTS` | The username or email is taken |
+| `USERNAME_INVALID`, `EMAIL_INVALID`, `PASSWORD_INVALID` | `registerUser` (or, for the password, `changePassword`) got a value in the wrong format |
 | `USER_NOTFOUND` | No user with that username |
 | `CREDENTIALS_INVALID` | Wrong password |
 | `SESSION_NOTFOUND` | Unknown or logged-out session |
