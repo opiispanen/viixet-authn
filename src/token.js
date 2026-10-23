@@ -1,3 +1,4 @@
+import { randomInt } from 'node:crypto'
 import bcrypt from 'bcrypt'
 import { v4 as uuidv4 } from 'uuid'
 import { transaction } from '../db/transaction.js'
@@ -66,13 +67,13 @@ export async function deactivateAuthToken(token_id) {
 }
 
 function generateRandomNumbers() {
-    const randomNumbers = [];
-    
+    const randomNumbers = []
+
     for (let i = 0; i < 6; i++) {
-        randomNumbers.push(Math.floor(Math.random() * 10));
+        randomNumbers.push(randomInt(0, 10))
     }
 
-    return randomNumbers;
+    return randomNumbers
 }
 
 // Requesting codes is rate limited per session and throws RATE_LIMITED (with
@@ -219,7 +220,7 @@ export async function changePassword(password, token, user_id, session_id) {
     if (rows.length === 0) throw new Error(ERRORS.TOKEN_NOTFOUND)
 
     const { token_id } = rows[0]
-	
+
     if (!token_id) throw new Error(ERRORS.TOKEN_INVALID)
 
     await deactivateAuthToken(token_id)
