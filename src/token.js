@@ -2,7 +2,7 @@ import { randomInt } from 'node:crypto'
 import bcrypt from 'bcrypt'
 import { v4 as uuidv4 } from 'uuid'
 import { transaction } from '../db/transaction.js'
-import { activateSession } from './session.js'
+import { activateSession, deleteUserSessions } from './session.js'
 import { hitRateLimit } from './rateLimit.js'
 import { ERRORS } from './errors.js'
 
@@ -230,11 +230,14 @@ export async function changePassword(password, token, user_id, session_id) {
     `
     const { changes } = await transaction(
         update, 
-        [ 
-            hashedPassword, 
-            user_id 
+        [
+            hashedPassword,
+            user_id
         ]
     )
+
+    // A new password ends every session, so anyone who knew the old one is logged out
+    if (changes) await deleteUserSessions(user_id)
 
     return !!changes
 }

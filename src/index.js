@@ -14,6 +14,9 @@ export {
     authenticate,
 } from './user.js'
 export {
+    deleteUserSessions,
+} from './session.js'
+export {
     hitRateLimit,
     resetRateLimit,
     purgeRateLimits,

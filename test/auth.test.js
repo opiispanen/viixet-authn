@@ -321,6 +321,32 @@ test('password reset link lasts 45 minutes', async () => {
     assert.ok((await lib.loginUser('kaarlo', 'new-secret')).session_id)
 })
 
+test('changePassword ends all of the user\'s sessions, and only theirs', async () => {
+    const user_id = await lib.registerUser('veikko', 'secret', 'veikko@example.com')
+    await lib.registerUser('aino', 'secret', 'aino@example.com')
+    const { session_id: stolen } = await lib.loginUser('veikko', 'secret')
+    const { session_id: other } = await lib.loginUser('aino', 'secret')
+    const reset_session = await createSession(user_id, 0)
+
+    await lib.createPasswordRenewalToken('veikko-reset-token', user_id, reset_session)
+    await lib.changePassword('new-secret', 'veikko-reset-token', user_id, reset_session)
+
+    await assert.rejects(
+        lib.authenticate(stolen),
+        { message: lib.VIIXET_AUTHN_ERRORS.SESSION_NOTFOUND }
+    )
+    assert.ok(await lib.authenticate(other))
+})
+
+test('deleteUserSessions returns how many sessions it ended', async () => {
+    const user_id = await lib.registerUser('onni', 'secret', 'onni@example.com')
+    await lib.loginUser('onni', 'secret')
+    await lib.loginUser('onni', 'secret')
+
+    assert.equal(await lib.deleteUserSessions(user_id), 2)
+    assert.equal(await lib.deleteUserSessions(user_id), 0)
+})
+
 test('2FA code is spent after 5 wrong guesses', async () => {
     const user_id = await lib.registerUser('siiri', 'secret', 'siiri@example.com')
     const session_id = await createSession(user_id, 0)

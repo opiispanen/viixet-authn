@@ -135,6 +135,7 @@ await changePassword(newPassword, token, user_id, session_id) // true: sets the 
 ```
 
 - Each token works once and then it is spent.
+- A successful `changePassword` ends every session of that user, so anyone who knew the old password is logged out. The user has to log in again with the new one. `deleteUserSessions(user_id)` does the same on its own, for example for a "log out everywhere" button, and returns how many sessions it ended.
 - Both functions need a `session_id` and `user_id` besides the token, so your link has to carry them or you have to find them from the token. A token for someone who isn't logged in needs an inactive session created first with `createSession(user_id, 0)`. At the moment that is imported with `import { createSession } from 'viixet-authn/src/session.js'`. It will be exported from the main entry later.
 - Don't reveal whether an email address exists. Answer "if the address is registered, we sent a link" in both cases.
 
