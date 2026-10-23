@@ -5,15 +5,19 @@ export {
     createEmailLoginToken,
     authenticateLoginToken,
     createPasswordRenewalToken,
-    changePassword, 
+    changePassword,
+    getAuthToken,
 } from './token.js'
 export {
     loginUser,
     logoutUser,
     registerUser,
     authenticate,
+    userExists,
+    getUserByLogin,
 } from './user.js'
 export {
+    createSession,
     deleteUserSessions,
 } from './session.js'
 export {

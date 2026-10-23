@@ -144,7 +144,17 @@ await changePassword(newPassword, token, user_id, session_id) // true: sets the 
 - The module stores only a bcrypt hash of the token, not the token. A copy of the database file does not give working links. bcrypt reads only the first 72 bytes of a token, so use a token of 72 characters or fewer. The example above gives 64.
 - Do not look for tokens in the `auth_token` table with `WHERE token = ?`. That column holds hashes.
 - A successful `changePassword` ends every session of that user, so anyone who knew the old password is logged out. The user has to log in again with the new one. `deleteUserSessions(user_id)` does the same on its own, for example for a "log out everywhere" button, and returns how many sessions it ended.
-- Both functions need a `session_id` and `user_id` besides the token, so your link has to carry them or you have to find them from the token. A token for someone who isn't logged in needs an inactive session created first with `createSession(user_id, 0)`. At the moment that is imported with `import { createSession } from 'viixet-authn/src/session.js'`. It will be exported from the main entry later.
+- Both functions need a `session_id` and `user_id` besides the token. Put the `token_id` that the create function gives back in the link, next to the token. When the link is opened, `getAuthToken(token_id, type)` gives you the `user_id` and `session_id`, and then you call the function above with them:
+  ```js
+  const { token_id } = await createPasswordRenewalToken(token, user_id, session_id)
+  // link: /resetpassword/<token_id>/<token>
+
+  const { user_id, session_id } = await getAuthToken(token_id, AUTH_TOKEN_TYPE.passwordRenewal)
+  await changePassword(newPassword, token, user_id, session_id)
+  ```
+  `getAuthToken` throws `TOKEN_NOTFOUND` if the token is unknown, used, expired or of another type. It does not check the secret token. `changePassword` does. Use `AUTH_TOKEN_TYPE.emailLogin` for login links.
+- A token for someone who isn't logged in needs an inactive session created first with `createSession(user_id, 0)`.
+- To start a reset, find the user from the username and email they typed with `getUserByLogin(username, email)`. It returns `{ user_id, username, email }` and throws `USER_NOTFOUND` if no active user matches both. Letter case doesn't matter. `userExists(username, email)` tells you with `true` or `false` if either one is already taken.
 - Don't reveal whether an email address exists. Answer "if the address is registered, we sent a link" in both cases.
 
 ### Rate limiting

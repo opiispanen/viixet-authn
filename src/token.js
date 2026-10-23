@@ -56,6 +56,33 @@ export async function createAuthToken(type, token, user_id, session_id) {
     return tokenId
 }
 
+// Finds an unused, unexpired token by its public token_id (the value that
+// createEmailLoginToken, createPasswordRenewalToken and createTwoFactorCode give back),
+// so a link only has to carry token_id and the secret token. Throws TOKEN_NOTFOUND for
+// an unknown, used, expired or wrong-type token. It doesn't check the secret: the
+// functions that use the token do that. The stored hash is never returned.
+export async function getAuthToken(token_id, type) {
+    if (typeof token_id !== 'string' || !TOKEN_MAX_AGE_MINUTES[type]) {
+        throw new Error(ERRORS.TOKEN_NOTFOUND)
+    }
+
+    const query = `SELECT
+            user_id,
+            session_id,
+            created
+        FROM auth_token
+        WHERE deleted = 0
+        AND token_id = ?
+        AND type = ?
+        ${ notExpiredSql(type) }
+        LIMIT 1`
+    const { rows } = await transaction(query, [ token_id, type ])
+
+    if (rows.length === 0) throw new Error(ERRORS.TOKEN_NOTFOUND)
+
+    return rows[0]
+}
+
 export async function deactivateAuthToken(token_id) {
     const query = `
         UPDATE auth_token SET deleted = 1 WHERE token_id = ?

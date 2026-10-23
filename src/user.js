@@ -27,6 +27,27 @@ export async function userExists(username, email = username) {
     return rows.length > 0
 }
 
+// Finds an active user by username and email together, for example to start a
+// password reset. Letter case doesn't matter. Throws USER_NOTFOUND if there is no
+// such user. The password is never returned.
+export async function getUserByLogin(username, email) {
+    if (typeof username !== 'string' || typeof email !== 'string') {
+        throw new Error(ERRORS.USER_NOTFOUND)
+    }
+
+    const query = `
+        SELECT user_id, username, email
+        FROM user
+        WHERE deleted = 0 AND username_key = ? AND email_key = ?
+        LIMIT 1
+    `
+    const { rows } = await transaction(query, [nameKey(username), nameKey(email)])
+
+    if (rows.length === 0) throw new Error(ERRORS.USER_NOTFOUND)
+
+    return rows[0]
+}
+
 // The username and email are trimmed, and the values are stored trimmed. Input that
 // doesn't pass the format rules (see src/validate.js) throws USERNAME_INVALID,
 // EMAIL_INVALID or PASSWORD_INVALID, and nothing is stored.

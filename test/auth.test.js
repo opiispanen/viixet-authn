@@ -471,6 +471,73 @@ test('password reset link lasts 45 minutes', async () => {
     assert.ok((await lib.loginUser('kaarlo', 'new-secret')).session_id)
 })
 
+test('createSession and userExists are exported from the main entry', () => {
+    assert.equal(typeof lib.createSession, 'function')
+    assert.equal(typeof lib.userExists, 'function')
+})
+
+test('getUserByLogin finds an active user by username and email, ignoring letter case', async () => {
+    const user_id = await lib.registerUser('LoginLookup', 'secret-password', 'Lookup@Example.com')
+
+    assert.deepEqual(
+        await lib.getUserByLogin('loginlookup', 'LOOKUP@example.com'),
+        { user_id, username: 'LoginLookup', email: 'Lookup@Example.com' }
+    )
+
+    // Username and email both have to match, and the password is never returned
+    await assert.rejects(
+        lib.getUserByLogin('LoginLookup', 'other@example.com'),
+        { message: lib.VIIXET_AUTHN_ERRORS.USER_NOTFOUND }
+    )
+    await assert.rejects(
+        lib.getUserByLogin('nobodyhere', 'Lookup@Example.com'),
+        { message: lib.VIIXET_AUTHN_ERRORS.USER_NOTFOUND }
+    )
+    await assert.rejects(
+        lib.getUserByLogin(undefined, undefined),
+        { message: lib.VIIXET_AUTHN_ERRORS.USER_NOTFOUND }
+    )
+
+    // A deleted user is not found
+    const { transaction } = await import('../db/transaction.js')
+
+    await transaction('UPDATE user SET deleted = 1 WHERE user_id = ?', [user_id])
+    await assert.rejects(
+        lib.getUserByLogin('LoginLookup', 'Lookup@Example.com'),
+        { message: lib.VIIXET_AUTHN_ERRORS.USER_NOTFOUND }
+    )
+})
+
+test('getAuthToken finds a token by token_id until it is used, expired or of another type', async () => {
+    const { passwordRenewal, emailLogin } = lib.AUTH_TOKEN_TYPE
+    const NOTFOUND = { message: lib.VIIXET_AUTHN_ERRORS.TOKEN_NOTFOUND }
+    const user_id = await lib.registerUser('tokenlookup', 'secret-password', 'tokenlookup@example.com')
+    const session_id = await createSession(user_id, 0)
+    const { token_id } = await lib.createPasswordRenewalToken('lookup-reset-token', user_id, session_id)
+
+    const found = await lib.getAuthToken(token_id, passwordRenewal)
+
+    assert.deepEqual(Object.keys(found).sort(), ['created', 'session_id', 'user_id'])
+    assert.equal(found.user_id, user_id)
+    assert.equal(found.session_id, session_id)
+
+    await assert.rejects(lib.getAuthToken(token_id, emailLogin), NOTFOUND)
+    await assert.rejects(lib.getAuthToken(token_id, 99), NOTFOUND)
+    await assert.rejects(lib.getAuthToken('unknown-id', passwordRenewal), NOTFOUND)
+    await assert.rejects(lib.getAuthToken(undefined, passwordRenewal), NOTFOUND)
+
+    // Using the token spends it
+    await lib.changePassword('a-better-password', 'lookup-reset-token', user_id, session_id)
+    await assert.rejects(lib.getAuthToken(token_id, passwordRenewal), NOTFOUND)
+
+    // A reset token is expired after 45 minutes
+    const old = await lib.createPasswordRenewalToken('lookup-old-token', user_id, session_id)
+
+    assert.ok(await lib.getAuthToken(old.token_id, passwordRenewal))
+    await ageToken(old.token_id, 46)
+    await assert.rejects(lib.getAuthToken(old.token_id, passwordRenewal), NOTFOUND)
+})
+
 test('changePassword refuses a weak password and keeps the token for a good one', async () => {
     const user_id = await lib.registerUser('weakreset', 'secret-password', 'weakreset@example.com')
     const session_id = await createSession(user_id, 0)
