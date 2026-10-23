@@ -140,11 +140,45 @@ export async function authenticateTwoFactorCode(numbers, token_id, user_id, sess
     return true
 }
 
+// Email login and password reset tokens are made by the app. Only a bcrypt hash is
+// stored, as for 2FA codes, so a leaked database doesn't hold working links.
+// bcrypt reads only the first 72 bytes of the token.
+async function hashToken(token) {
+    return bcrypt.hash(token, 10)
+}
+
+// Looks for an unused, unexpired token of this type for this user and session. The
+// stored value is a hash, so it can't be found with `WHERE token = ?`: the rows are
+// read and compared one by one. Only the 5 newest are compared, so a flood of
+// requests can't make this slow.
+async function findUnusedToken(type, token, user_id, session_id) {
+    if (typeof token !== 'string' || token === '') return null
+
+    const query = `SELECT
+            token_id,
+            token
+        FROM auth_token
+        WHERE deleted = 0
+        AND user_id = ?
+        AND session_id = ?
+        AND type = ?
+        ${ notExpiredSql(type) }
+        ORDER BY created DESC, rowid DESC
+        LIMIT 5`
+    const { rows } = await transaction(query, [ user_id, session_id, type ])
+
+    for (const row of rows) {
+        if (await bcrypt.compare(token, row.token)) return row.token_id
+    }
+
+    return null
+}
+
 export async function createEmailLoginToken(token, user_id, session_id) {
     const token_id = await createAuthToken(
-        AUTH_TOKEN_TYPE.emailLogin, 
-        token, 
-        user_id, 
+        AUTH_TOKEN_TYPE.emailLogin,
+        await hashToken(token),
+        user_id,
         session_id
     )
 
@@ -152,31 +186,9 @@ export async function createEmailLoginToken(token, user_id, session_id) {
 }
 
 export async function authenticateLoginToken(token, user_id, session_id) {
-    const query = `SELECT 
-            token_id 
-        FROM auth_token 
-        WHERE deleted = 0 
-        AND token = ? 
-        AND user_id = ? 
-        AND session_id = ? 
-        AND type = ?
-        ${ notExpiredSql(AUTH_TOKEN_TYPE.emailLogin) }
-        LIMIT 1`
-    const { rows } = await transaction(
-        query,
-        [
-            token,
-            user_id,
-            session_id,
-            AUTH_TOKEN_TYPE.emailLogin
-        ]
-    )
+    const token_id = await findUnusedToken(AUTH_TOKEN_TYPE.emailLogin, token, user_id, session_id)
 
-    if (rows.length === 0) throw new Error(ERRORS.TOKEN_NOTFOUND)
-    
-    const { token_id } = rows[0]
-
-    if (!token_id) throw new Error(ERRORS.TOKEN_INVALID)
+    if (!token_id) throw new Error(ERRORS.TOKEN_NOTFOUND)
 
     await deactivateAuthToken(token_id)
     await activateSession(session_id)
@@ -186,9 +198,9 @@ export async function authenticateLoginToken(token, user_id, session_id) {
 
 export async function createPasswordRenewalToken(token, user_id, session_id) {
     const token_id = await createAuthToken(
-        AUTH_TOKEN_TYPE.passwordRenewal, 
-        token, 
-        user_id, 
+        AUTH_TOKEN_TYPE.passwordRenewal,
+        await hashToken(token),
+        user_id,
         session_id
     )
 
@@ -197,31 +209,9 @@ export async function createPasswordRenewalToken(token, user_id, session_id) {
 
 export async function changePassword(password, token, user_id, session_id) {
     const hashedPassword = await bcrypt.hash(password, 10)
-    const query = `SELECT 
-            token_id 
-        FROM auth_token 
-        WHERE deleted = 0 
-        AND token = ? 
-        AND user_id = ? 
-        AND session_id = ? 
-        AND type = ?
-        ${ notExpiredSql(AUTH_TOKEN_TYPE.passwordRenewal) }
-        LIMIT 1`
-    const { rows } = await transaction(
-        query,
-        [
-            token,
-            user_id,
-            session_id,
-            AUTH_TOKEN_TYPE.passwordRenewal
-        ]
-    )
+    const token_id = await findUnusedToken(AUTH_TOKEN_TYPE.passwordRenewal, token, user_id, session_id)
 
-    if (rows.length === 0) throw new Error(ERRORS.TOKEN_NOTFOUND)
-
-    const { token_id } = rows[0]
-
-    if (!token_id) throw new Error(ERRORS.TOKEN_INVALID)
+    if (!token_id) throw new Error(ERRORS.TOKEN_NOTFOUND)
 
     await deactivateAuthToken(token_id)
 

@@ -5,6 +5,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import bcrypt from 'bcrypt'
 import sqlite3 from 'sqlite3'
 
 // Every query opens its own connection, so ':memory:' would give each query an
@@ -291,12 +292,53 @@ for (const zone of ['UTC', 'Europe/Helsinki', 'America/New_York']) {
 async function tokenId(token, type) {
     const { transaction } = await import('../db/transaction.js')
     const { rows } = await transaction(
-        'SELECT token_id FROM auth_token WHERE token = ? AND type = ?',
-        [token, type]
+        'SELECT token_id, token FROM auth_token WHERE type = ?',
+        [type]
     )
 
-    return rows[0].token_id
+    // Tokens are stored as bcrypt hashes
+    for (const row of rows) {
+        if (await bcrypt.compare(token, row.token)) return row.token_id
+    }
+
+    throw new Error(`No ${ type } token matches ${ token }`)
 }
+
+test('email login and reset tokens are stored as hashes', async () => {
+    const user_id = await lib.registerUser('lyyli', 'secret', 'lyyli@example.com')
+    const login_session = await createSession(user_id, 0)
+    const reset_session = await createSession(user_id, 0)
+    const { transaction } = await import('../db/transaction.js')
+
+    await lib.createEmailLoginToken('lyyli-login-token', user_id, login_session)
+    await lib.createPasswordRenewalToken('lyyli-reset-token', user_id, reset_session)
+
+    const { rows } = await transaction(
+        'SELECT token FROM auth_token WHERE user_id = ?',
+        [user_id]
+    )
+    assert.equal(rows.length, 2)
+    for (const { token } of rows) {
+        assert.notEqual(token, 'lyyli-login-token')
+        assert.notEqual(token, 'lyyli-reset-token')
+        assert.match(token, /^\$2[aby]\$/)
+    }
+
+    // The right token works, a wrong one or one from another session doesn't
+    await assert.rejects(
+        lib.authenticateLoginToken('wrong-token', user_id, login_session),
+        { message: lib.VIIXET_AUTHN_ERRORS.TOKEN_NOTFOUND }
+    )
+    await assert.rejects(
+        lib.authenticateLoginToken('lyyli-login-token', user_id, reset_session),
+        { message: lib.VIIXET_AUTHN_ERRORS.TOKEN_NOTFOUND }
+    )
+    assert.equal(await lib.authenticateLoginToken('lyyli-login-token', user_id, login_session), true)
+    await assert.rejects(
+        lib.authenticateLoginToken('lyyli-login-token', user_id, login_session),
+        { message: lib.VIIXET_AUTHN_ERRORS.TOKEN_NOTFOUND }
+    )
+})
 
 test('2FA code expires after 15 minutes', async () => {
     const user_id = await lib.registerUser('impi', 'secret', 'impi@example.com')
